@@ -4,6 +4,9 @@ from termcolor import cprint
 from environments.robomimic.robosuite_image_wrapper import \
     RobosuiteImageWrapper
 
+from environments.robomimic.robosuite_pose_wrapper import \
+    RobosuitePoseWrapper
+
 
 def make_env_robomimic(
     env_meta,
@@ -13,7 +16,7 @@ def make_env_robomimic(
     add_state=True,
     reward_shaping=False,
     offscreen_render=False,
-    has_renderer=True,
+    has_renderer=False,
 ):
     """
     Create and configure an environment based on the provided metadata.
@@ -51,8 +54,8 @@ def make_env_robomimic(
         env_kwargs["camera_widths"] = config.highres_img_size
 
     env = suite.make(**env_kwargs)
-    env = RobosuiteImageWrapper(
-        env, keys=obs_keys, shape_meta=shape_meta, add_state=add_state, config=config
+    env = RobosuitePoseWrapper(
+        env_kwargs, env, keys=obs_keys, shape_meta=shape_meta, add_state=add_state, config=config
     )
     cprint(
         f"Initialized robomimic env with action repeat: {config.action_repeat}, time limit: {config.time_limit}",

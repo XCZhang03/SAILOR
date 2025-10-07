@@ -5,13 +5,14 @@ import gc
 import os
 import pathlib
 import sys
-
+from datetime import datetime
 sys.path.append(
     os.path.join(os.getcwd(), "sailor/diffusion")
 )  # For diffusion4robotics imports
 
 import numpy as np
 import ruamel.yaml as yaml
+yaml = yaml.YAML(typ="safe", pure=True)  # For loading configs
 import torch
 from termcolor import cprint
 
@@ -146,7 +147,7 @@ def train_eval(config):
         )
         # Initialize DP
         preprocessor = Preprocessor(config=config)
-        encoder = None if config.state_only else ResNetEncoder()
+        encoder = None if config.state_only else ResNetEncoder(num_cams=config.dp['num_cams'])                    
         base_policy = DiffusionBasePolicy(
             preprocessor=preprocessor,
             encoder=encoder,
@@ -258,7 +259,7 @@ def make_env(config):
             add_state=True,
             reward_shaping=shape_rewards,
             config=config,
-            offscreen_render=False,
+            offscreen_render=True,
         )
         env = wrappers.TimeLimit(env, duration=config.time_limit)
         env = wrappers.SelectAction(env, key="action")
@@ -328,15 +329,13 @@ def convert_type(value):
         except ValueError:
             return value  # Return as string if it's neither int nor float
 
-
-if __name__ == "__main__":
+def get_config(**kwargs):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--configs", nargs="+")
-    parser.add_argument("--expt_name", type=str, default=None)
+    parser.add_argument("--configs", nargs="+", default=['cfg_dp_mppi', 'robomimic', 'debug'])
+    parser.add_argument("--exp_name", type=str, default='test')
     parser.add_argument("--resume_run", type=bool, default=False)
     args, remaining = parser.parse_known_args()
 
-    yaml = yaml.YAML(typ="safe", pure=True)
     configs = yaml.load(
         (pathlib.Path(sys.argv[0]).parent / "sailor/configs.yaml").read_text()
     )
@@ -393,7 +392,7 @@ if __name__ == "__main__":
 
     # Set log dir and datadir
     final_config.logdir = (
-        f"{final_config.scratch_dir}/logs/{exp_name}/seed{final_config.seed}"
+        f"{final_config.scratch_dir}/logs/{exp_name}/seed{final_config.seed}/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
     )
     final_config.datadir = os.path.join("datasets", f"{suite}_datasets")
 
@@ -405,7 +404,10 @@ if __name__ == "__main__":
         final_config.train_dp_mppi_params["n_env_steps"] = final_config.env_max_steps[
             task.lower()
         ]
+    return final_config
 
+if __name__ == "__main__":
+    final_config = get_config()
     train_eval(final_config)
     with contextlib.redirect_stderr(open(os.devnull, "w")):
         gc.collect()  # Force garbage collection to run

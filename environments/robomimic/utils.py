@@ -66,7 +66,7 @@ def get_robomimic_dataset_path_and_env_meta(
     if shaped:
         dataset_name += "_shaped"
     dataset_name += f"_done{done_mode}"
-    dataset_path = f"{env_id.lower()}/{collection_type}/{dataset_name}_v141.hdf5"
+    dataset_path = f"{env_id.lower()}/{collection_type}/{dataset_name}_v15.hdf5"
 
     root_dir = datadir
     dataset_path = Path(root_dir, dataset_path)

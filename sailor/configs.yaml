@@ -1,6 +1,6 @@
 defaults:  
   # Directory Configs
-  scratch_dir: "scratch_dir/"
+  scratch_dir: "./scratch_dir/"
   datadir: null # Set automatically using the suite
 
   # General Configs
@@ -13,7 +13,7 @@ defaults:
 
   # Wandb configs
   use_wandb: True
-  wandb_entity: 'scaling-rl' # Top level name
+  wandb_entity: '504985967' # Top level name
   wandb_project: null
   wandb_exp_name: null
 
@@ -25,12 +25,12 @@ defaults:
   generate_highres_eval: False
 
   # Data params
-  num_exp_trajs: -1 # To be specified when starting a new run
+  num_exp_trajs: 150 # To be specified when starting a new run
   num_exp_val_trajs: 1
   normalize_state_actions: False
-  image_size: 64
+  image_size: 128
   obs_horizon: 2 # Number of observations to stack
-  action_horizon: 1 # Number of actions to take
+  action_horizon: 2 # Number of actions to take
   pred_horizon: 8 # Number of actions to stack
   num_buffer_transitions: 100000
   state_dim: -1 # To be set when loading expert data
@@ -38,11 +38,11 @@ defaults:
 
   # Evaluation
   eval_num_runs: 50
-  visualize_eval: True # Store videos of all eval runs
+  visualize_eval: False # Store videos of all eval runs
   log_every: 50
 
   # Environment
-  task: null
+  task: 'robomimic__can' # To be specified when starting a new run
   num_envs: 10
   time_limit: -1 # overwritten for each env, defined below
   high_res_render: False # If true, videos will be stored in high resolution
@@ -107,7 +107,7 @@ defaults:
     action_space: 'deltas'
     ac_chunk: 8
     img_chunk: 2
-    num_cams: 2
+    num_cams: 1
     train_transform: 'gpu_medium'
     debug: False
     print_config: False
@@ -241,7 +241,7 @@ debug:
   train_ratio: 50
   num_envs: 3
   num_buffer_transitions: 50
-  visualize_eval: True
+  visualize_eval: False
 
   dp:
     train_steps: 10

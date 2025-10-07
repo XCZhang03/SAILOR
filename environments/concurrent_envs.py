@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 import contextlib
 import copy
 import gc
@@ -103,6 +104,25 @@ class ConcurrentEnvs:
             all_dones,
             {"success": all_successes, "orig_reward": all_orig_rewards},
         )
+
+    def call_env_method(self, method_name, *args, **kwargs):
+        """
+        Calls the specified method on each environment with the given arguments.
+        Returns a dict with keys as env indices and values as the method returns.
+        """
+        results = defaultdict(list)
+        for i, env in enumerate(self.envs):
+            method = getattr(env, method_name)
+            cur_args = [arg[i] if isinstance(arg, Iterable) else arg for arg in args]
+            cur_kwargs = {
+                k: v[i] if isinstance(v, Iterable) else v for k, v in kwargs.items()
+            }
+            env_results = method(*cur_args, **cur_kwargs)
+            for key, value in env_results.items():
+                results[key].append(value)
+        for key in results:
+            results[key] = np.stack(results[key], axis=0)
+        return dict(results)
 
     def close(self):
         for env in self.envs:

@@ -371,7 +371,8 @@ class DiffusionUnetAgent(Agent):
     def forward(self, imgs, obs, ac_flat, mask_flat):
         # self.debug_batch(imgs, obs, "forward")
         # get observation encoding and sample noise/timesteps
-        B, device = obs.shape[0], obs.device
+        # B, device = obs.shape[0], obs.device
+        B, device = imgs['cam0'].shape[0], imgs['cam0'].device
         s_t = self._shared_forward(imgs, obs)
         timesteps = torch.randint(
             low=0, high=self._train_diffusion_steps, size=(B,), device=device
@@ -415,7 +416,8 @@ class DiffusionUnetAgent(Agent):
     def get_actions(self, imgs, obs, scale=1.0, n_steps=None):
         # self.debug_batch(imgs, obs, "get_actions")
         # get observation encoding and sample noise
-        B, device = obs.shape[0], obs.device
+        # B, device = obs.shape[0], obs.device
+        B, device = imgs['cam0'].shape[0], imgs['cam0'].device
         s_t = self._shared_forward(imgs, obs)
         noise_actions = torch.randn(B, self.ac_chunk, self.ac_dim, device=device)
 

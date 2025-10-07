@@ -62,8 +62,9 @@ class Preprocessor:
         for key, value in batch.items():
             if "image" in key:
                 batch[key] = torch.Tensor(value) / 255.0
-
-        batch["cont"] = 1 - torch.Tensor(batch["is_terminal"]).unsqueeze(-1)
+        
+        if "is_terminal" in batch:
+            batch["cont"] = 1 - torch.Tensor(batch["is_terminal"]).unsqueeze(-1)
         batch = {k: torch.Tensor(v).to(self.device) for k, v in batch.items()}
 
         # Make images from (H, W, C) to (C, H, W) and resize to 224
@@ -115,6 +116,8 @@ class Preprocessor:
         # Modify from (BS, BL, ..., stack_dim) to (BS*BL, stack_dim, ...) for DATA_KEYS
         # We assume the l = 1 here so do not reshape back to (BS, BL, ...)
         BS = batch["state"].shape[0]
+        if 'robot0_eye_in_hand_image' not in self.DATA_KEYS:
+            batch.pop('robot0_eye_in_hand_image', None)
         for key in self.DATA_KEYS:
             batch[key] = rearrange(batch[key], "b l ... s -> (b l) s ...")
 
@@ -163,6 +166,8 @@ class Preprocessor:
         """
         # Modify from (BS, BL, ..., stack_dim) to (BS*BL, stack_dim, ...) for DATA_KEYS
         # We assume the l = 1 here so do not reshape back to (BS, BL, ...)
+        if 'robot0_eye_in_hand_image' not in self.DATA_KEYS:
+            batch.pop('robot0_eye_in_hand_image', None)
         for key in self.DATA_KEYS:
             batch[key] = rearrange(batch[key], "b l ... s -> (b l) s ...")
 

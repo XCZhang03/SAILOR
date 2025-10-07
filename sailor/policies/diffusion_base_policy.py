@@ -20,7 +20,7 @@ from sailor.diffusion.data4robotics.trainers.utils import optim_builder
 from sailor.dreamer import tools
 
 
-class WeigtedActionWrapper:
+class WeightedActionWrapper:
     IMAGE_KEYS = ["agentview_image", "robot0_eye_in_hand_image"]
 
     def __init__(self, agent, config, preprocessor: Preprocessor, EXP_WEIGHT=0.0):
@@ -53,7 +53,7 @@ class WeigtedActionWrapper:
         Input: num_envs x ...
         """
         assert (
-            obs["state"].shape[0] == self.num_envs
+            obs["agentview_image"].shape[0] == self.num_envs
         ), "Batch size mismatch in observations"
 
         # Get stacked images based on images seen by the WeigtedActionWrapper
@@ -80,7 +80,7 @@ class WeigtedActionWrapper:
                 obs[key] = np.stack(stacked_images[key], axis=0)
 
         # Unsqueeze state for preprocessing
-        obs["state"] = obs["state"][:, None, ...]  # (num_envs, 1, ...)
+        # obs["state"] = obs["state"][:, None, ...]  # (num_envs, 1, ...)
 
         # Preprocess the data (input shape is [num_envs x obs_horizon x ...])
         obs = self.preprocessor.preprocess_batch(obs, training=False)
@@ -96,8 +96,8 @@ class WeigtedActionWrapper:
         else:
             images = None
 
-        state = obs["state"][:, -1, :].to(torch.float32)  # Take the last state
-        return images, state
+        # state = obs["state"][:, -1, :].to(torch.float32)  # Take the last state
+        return images, None
 
     def get_weighted_action(self, ac, env_id, get_full_action=False):
         """
@@ -156,7 +156,7 @@ class WeigtedActionWrapper:
         """
         # If buffers are None, initialize them and set num_envs
         if self.image_history is None or self.act_history is None:
-            self.num_envs = obs["state"].shape[0]
+            self.num_envs = obs["agentview_image"].shape[0]
             self.image_history = defaultdict(
                 lambda: [deque(maxlen=self.obs_horizon) for _ in range(self.num_envs)]
             )
@@ -272,7 +272,7 @@ class DiffusionBasePolicy:
         self.action_dim = action_dim
         self.initialize_model(encoder)
         self.initialize_trainer()
-        self.policy = WeigtedActionWrapper(
+        self.policy = WeightedActionWrapper(
             agent=self.diffusion_unet,
             config=self.config,
             preprocessor=self.preprocessor,
@@ -290,7 +290,7 @@ class DiffusionBasePolicy:
             shared_mlp=self.config.dp["shared_mlp"],
             odim=self.state_dim,
             n_cams=self.config.dp["num_cams"],
-            use_obs=True,
+            use_obs=False,
             dropout=0.1,
             train_diffusion_steps=100,
             eval_diffusion_steps=16,
