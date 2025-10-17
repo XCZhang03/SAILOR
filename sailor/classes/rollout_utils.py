@@ -73,14 +73,14 @@ def get_act_stacked(act_list, pred_horizon):
 def add_env_obs_to_dict(
     obs,
     obs_traj: dict,
-    base_action,
-    residual_action,
-    action,
-    rewards,
-    dones,
-    pixel_keys: list,
-    step_idx,
-    max_traj_len,
+    base_action=None,
+    residual_action=None,
+    action=None,
+    rewards=None,
+    dones=None,
+    pixel_keys: list=None,
+    step_idx=None,
+    max_traj_len=None,
 ):
     """
     obs shape: num_envs x ...
@@ -99,8 +99,10 @@ def add_env_obs_to_dict(
             continue
 
         obs_traj_env["state"].append(obs["state"][env_idx])
-        obs_traj_env["base_action"].append(base_action[env_idx])
-        obs_traj_env["residual_action"].append(residual_action[env_idx])
+        if base_action is not None:
+            obs_traj_env["base_action"].append(base_action[env_idx])
+        if residual_action is not None:
+            obs_traj_env["residual_action"].append(residual_action[env_idx])
         obs_traj_env["action"].append(action[env_idx])
         obs_traj_env["reward"].append(rewards[env_idx])
         obs_traj_env["is_first"].append(step_idx == 0)

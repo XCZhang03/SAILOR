@@ -118,8 +118,9 @@ class ConcurrentEnvs:
                 k: v[i] if isinstance(v, Iterable) else v for k, v in kwargs.items()
             }
             env_results = method(*cur_args, **cur_kwargs)
-            for key, value in env_results.items():
-                results[key].append(value)
+            if env_results is not None:
+                for key, value in env_results.items():
+                    results[key].append(value)
         for key in results:
             results[key] = np.stack(results[key], axis=0)
         return dict(results)

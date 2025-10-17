@@ -55,10 +55,12 @@ class RobosuitePoseWrapper(RobosuiteImageWrapper):
             if "image" in key and 'robot' not in key:
                 self.camera_names.append(key.replace("_image", ""))
                 
+    def set_robot(self):
+        return {"qpos": self.empty_env.copy_robot_state(self.env)}
     
-    def render_action_pose(self, actions, reset_state=False):
-        if reset_state:
-            self.empty_env.copy_robot_state(self.env)
+    def render_action_pose(self, actions, set_robot=False):
+        if set_robot:
+            self.set_robot()
         self.simulation_step(actions)
         return self.render_simulation_pose()
 
@@ -73,7 +75,9 @@ class RobosuitePoseWrapper(RobosuiteImageWrapper):
 
     def reset(self, **kwargs):
         self.empty_env.reset()
-        return super().reset(**kwargs)
+        returns = super().reset(**kwargs)
+        self.set_robot()
+        return returns
     
     def simulation_step(self, actions):
         if len(actions.shape) == 1:
@@ -81,8 +85,8 @@ class RobosuitePoseWrapper(RobosuiteImageWrapper):
         for action in actions:
             self.empty_env.step(action)
     
-    def step(self, action, step_simulation=True):
+    def step(self, action, step_simulation=False):
         returns = super().step(action)
         if step_simulation:
-            self.empty_env.copy_robot_state(self.env)
+            self.set_robot()
         return returns
