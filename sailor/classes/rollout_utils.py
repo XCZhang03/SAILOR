@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 
 import cv2
+import imageio
 import einops
 import numpy as np
 import torch
@@ -382,3 +383,156 @@ def select_latest_obs(obs: dict):
         if key not in obs_out.keys():
             obs_out[key] = obs[key]
     return obs_out
+
+
+def save_trajectory_video(
+    obs_traj,
+    frame_skip=2,
+    save_dir="./videos",
+):
+    num_envs = len(obs_traj)
+    pose_save_dir = save_dir + "_pose"
+    os.makedirs(pose_save_dir, exist_ok=True)
+    os.makedirs(save_dir, exist_ok=True)
+    file_cnt = len(os.listdir(save_dir))
+    for env_idx in range(num_envs):
+        frames = []
+        pose_frames = []
+        for t in range(0, len(obs_traj[env_idx]["state"]), frame_skip):
+            if obs_traj[env_idx]["is_terminal"][t]:
+                break
+            img = obs_traj[env_idx]["agentview_image"][t]
+            pose_img = obs_traj[env_idx]["agentview_image_pose"][t]
+            frames.append(img)
+            pose_frames.append(pose_img)
+        save_path = os.path.join(save_dir, f"{file_cnt}.mp4")
+        pose_save_path = os.path.join(pose_save_dir, f"{file_cnt}.mp4")
+        imageio.mimwrite(save_path, frames, fps=4)
+        imageio.mimwrite(pose_save_path, pose_frames, fps=4)
+        file_cnt += 1
+
+def collect_wm_trajs(
+    num_steps,
+    max_traj_len,
+    base_policy,
+    train_env,
+    save_dir,
+    noise_fn=lambda x: x,
+):
+    start_time = time.time()
+    """
+    Collect num_trajs trajectories using base_policy in train_env
+    """
+    if num_steps == 0:
+        print("Collecting 0 steps.")
+        return
+
+    num_envs = train_env.num_envs
+    print(f"Collecting {num_steps} steps, Num Envs: {num_envs}")
+
+    obs = train_env.reset()
+    
+    pixel_keys = sorted([key for key in obs.keys() if "image" in key])
+    pixel_keys.append("agentview_image_pose")
+    
+    n_step_collected = 0
+    n_trajs = 0
+    while n_step_collected < num_steps:
+        obs_traj = [
+            {
+                "state": [],
+                "action": [],
+                "reward": [],
+                "is_first": [],
+                "is_last": [],
+                "is_terminal": [],
+                "success": False,
+                **{key: [] for key in pixel_keys},
+            }
+            for _ in range(num_envs)
+        ]  # List of independent dictionaries of data for each environment
+
+        obs = train_env.reset()
+        pose_image = train_env.call_env_method("render_simulation_pose")['agentview_image']
+        obs['agentview_image_pose'] = pose_image
+        base_policy.reset()
+
+        dones = np.zeros(num_envs, dtype=bool)
+
+        # Collect data for obs_list
+        print(f"Collected {n_step_collected}/{num_steps}, collecting more...")
+        for step_idx in range(max_traj_len):
+            if np.all(dones):
+                break
+
+            action = base_policy.get_action(obs)
+            action = noise_fn(action)
+            pose_image = train_env.call_env_method("render_action_pose", action, set_robot=(step_idx%8==0))['agentview_image']
+            obs['agentview_image_pose'] = pose_image
+            obs_next, rewards, dones, infos = train_env.step(action)
+
+            # Add obs and action to obs_list
+            add_env_obs_to_dict(
+                obs=obs,
+                obs_traj=obs_traj,
+                action=action,
+                rewards=rewards,
+                dones=dones,
+                pixel_keys=pixel_keys,
+                step_idx=step_idx,
+                max_traj_len=max_traj_len,
+            )
+
+            all_successes = infos["success"]  # num_envs x 1
+            for env_idx in range(num_envs):
+                obs_traj[env_idx]["success"] = (
+                    all_successes[env_idx] or obs_traj[env_idx]["success"]
+                )
+
+            obs = obs_next
+
+        
+        save_trajectory_video(obs_traj, frame_skip=2, save_dir=save_dir)
+        n_trajs += num_envs
+
+        for env_idx in range(num_envs):
+            n_step_collected += len(obs_traj[env_idx]["state"])
+
+        if n_step_collected >= num_steps:
+            break
+
+    print(
+        f"Time taken to collect {n_step_collected}/{num_steps} steps and {n_trajs} trajectories: {time.time() - start_time:.2f} seconds"
+    )
+    train_videos, val_videos = split_train_val(save_dir, val_ratio=0.1)
+    print(f"Train videos: {len(train_videos)}, Val videos: {len(val_videos)}")
+    
+    return n_step_collected
+
+def split_train_val(save_dir, val_ratio=0.1):
+    pose_save_dir = save_dir + "_pose"
+    all_videos = sorted(os.listdir(save_dir))
+    num_videos = len(all_videos)
+    num_val = int(num_videos * val_ratio)
+    num_train = num_videos - num_val
+
+    train_videos = all_videos[:num_train]
+    val_videos = all_videos[num_train:]
+    
+    train_dir = os.path.join(save_dir, "training")
+    val_dir = os.path.join(save_dir, "validation")
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(val_dir, exist_ok=True)
+    train_pose_dir = os.path.join(pose_save_dir, "training")
+    val_pose_dir = os.path.join(pose_save_dir, "validation")
+    os.makedirs(train_pose_dir, exist_ok=True)
+    os.makedirs(val_pose_dir, exist_ok=True)
+    
+    for video in train_videos:
+        os.rename(os.path.join(save_dir, video), os.path.join(train_dir, video))
+        os.rename(os.path.join(pose_save_dir, video), os.path.join(train_pose_dir, video))
+    for video in val_videos:
+        os.rename(os.path.join(save_dir, video), os.path.join(val_dir, video))
+        os.rename(os.path.join(pose_save_dir, video), os.path.join(val_pose_dir, video))
+
+    return train_videos, val_videos
