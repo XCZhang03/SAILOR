@@ -207,7 +207,9 @@ def get_train_val_datasets(config):
     clean_demos = []
     num_demos_per_file = max((num_train_trajs + num_val_trajs) // len(dataset_paths) + 1, 1)
     for dataset_path in dataset_paths:
-        print(f"Loading dataset from {dataset_path}")
+        if len(clean_demos) >= (num_train_trajs + num_val_trajs):
+            break
+        print(f"Loading dataset from {dataset_path}", flush=True)
 
         f = h5py.File(dataset_path, "r")
         demos = list(f["data"].keys())

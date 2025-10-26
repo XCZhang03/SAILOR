@@ -515,7 +515,7 @@ class DiffusionBasePolicy:
             trainer.model.ema.step(trainer.model.noise_net.parameters())
 
             if step % self.config.dp["log_freq"] == 0:
-                print(f"DP Step: {step}\tLog Step: {log_step}\tLoss: {loss.item()}")
+                print(f"DP Step: {step}\tLog Step: {log_step}\tLoss: {loss.item()}", flush=True)
                 if self.logger is not None:
                     self.logger.scalar(
                         name=f"{log_prefix}/train/loss", value=loss.item()
