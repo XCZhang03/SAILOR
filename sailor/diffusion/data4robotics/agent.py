@@ -177,8 +177,10 @@ class Agent(nn.Module):
                 if self._use_obs
                 else self.embed(imgs)
             )
-        else:
+        elif self._use_obs:
             shared_in = obs
+        else:
+            return None
 
         return self._shared_mlp(shared_in)
 
