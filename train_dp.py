@@ -145,79 +145,56 @@ def train_eval(config):
 
     # ============ Diffusion Policy Pretraining ===============
     # If checkpoint is not provided, train the DP
-    if config.dp["pretrained_ckpt"] == "":
+    cprint(
+        "----------------No base policy path provided, begin training diffusion policy--------------",
+        "yellow",
+        attrs=["bold"],
+    )
+    # Initialize DP
+    preprocessor = Preprocessor(config=config)
+    encoder = None if config.state_only else ResNetEncoder(num_cams=config.dp['num_cams'])                    
+    base_policy = DiffusionBasePolicy(
+        preprocessor=preprocessor,
+        encoder=encoder,
+        config=config,
+        device=config.device,
+        state_dim=state_dim,
+        action_dim=action_dim,
+        logger=logger,
+        name="DP_Pretrain",
+    )
+
+    if config.dp["pretrained_ckpt"] != "":
         cprint(
-            "----------------No base policy path provided, begin training diffusion policy--------------",
+            f"Loading pretrained diffusion policy from {config.dp['pretrained_ckpt']}",
             "yellow",
             attrs=["bold"],
         )
-        # Initialize DP
-        preprocessor = Preprocessor(config=config)
-        encoder = None if config.state_only else ResNetEncoder(num_cams=config.dp['num_cams'])                    
-        base_policy = DiffusionBasePolicy(
-            preprocessor=preprocessor,
-            encoder=encoder,
-            config=config,
-            device=config.device,
-            state_dim=state_dim,
-            action_dim=action_dim,
-            logger=logger,
-            name="DP_Pretrain",
-        )
+        base_policy.trainer.load_checkpoint(config.dp["pretrained_ckpt"])
 
-        # Train it
-        expert_dataset_dp = tools.make_dataset(
-            expert_eps, batch_length=1, batch_size=config.dp["batch_size"]
-        )
-        log_step = base_policy.train_base_policy(
-            train_dataset=expert_dataset_dp,
-            expert_val_eps=expert_val_eps,
-            eval_envs=envs,
-            log_prefix="dp_pretrain",
-        )
+    # Train it
+    expert_dataset_dp = tools.make_dataset(
+        expert_eps, batch_length=1, batch_size=config.dp["batch_size"]
+    )
+    log_step = base_policy.train_base_policy(
+        train_dataset=expert_dataset_dp,
+        expert_val_eps=expert_val_eps,
+        eval_envs=envs,
+        log_prefix="dp_pretrain",
+    )
 
-        # Store the saved pretrained checkpoint path
-        config.dp["pretrained_ckpt"] = os.path.relpath(
-            base_policy.ckpt_file, config.scratch_dir
-        )
+    # Store the saved pretrained checkpoint path
+    config.dp["pretrained_ckpt"] = os.path.resolve(base_policy.ckpt_file)
 
-        # Cleanup
-        del preprocessor
-        del encoder
-        del base_policy
-        torch.cuda.empty_cache()
-        gc.collect()
-
-    # ============ SAILOR Training ===============
-    if config.train_dp_mppi:
-        cprint(
-            "\n-----------------Begin training SAILOR --------------",
-            "yellow",
-            attrs=["bold"],
-        )
-        # Create buffer
-        train_eps = collections.OrderedDict()
-
-        # Build trainer
-        trainer = SAILORTrainer(
-            config=config,
-            expert_eps=expert_eps,
-            state_dim=state_dim,
-            action_dim=action_dim,
-            train_env=envs,
-            eval_envs=envs,
-            expert_val_eps=expert_val_eps,
-            train_eps=train_eps,
-            init_step=log_step,
-            logger=logger,
-        )
-
-        # Run train loop
-        trainer.train_dp_with_mppi()
-
+    # Cleanup
+    del preprocessor
+    del encoder
+    del base_policy
+    torch.cuda.empty_cache()
+    gc.collect()
     envs.close()
-    cprint("--------Finished Everything--------", "yellow", attrs=["bold"])
 
+    
 
 def close_envs(envs):
     for env in envs:
@@ -349,7 +326,7 @@ def convert_type(value):
 
 def get_config(**kwargs):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--configs", nargs="+", default=['cfg_dp_mppi', 'robomimic', 'debug'])
+    parser.add_argument("--configs", nargs="+", default=[])
     parser.add_argument("--exp_name", type=str, default='test')
     parser.add_argument("--resume_run", type=bool, default=False)
     args, remaining = parser.parse_known_args()
@@ -420,11 +397,6 @@ def get_config(**kwargs):
     if final_config.generate_highres_eval:
         final_config.high_res_render = True
 
-    # Set max steps
-    if not final_config.debug:
-        final_config.train_dp_mppi_params["n_env_steps"] = final_config.env_max_steps[
-            task.lower()
-        ]
     return final_config
 
 if __name__ == "__main__":

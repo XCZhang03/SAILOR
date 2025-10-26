@@ -36,15 +36,9 @@ class RobosuitePoseWrapper(RobosuiteImageWrapper):
     """
 
     def __init__(
-        self, env_kwargs, *args, **kwargs
+        self, empty_env_kwargs, *args, **kwargs
     ):
         super().__init__(*args, **kwargs)
-        empty_env_kwargs = env_kwargs.copy()
-        empty_env_kwargs['env_name'] = "EmptyEnv"
-        empty_env_kwargs['hard_reset'] = False
-        empty_env_kwargs['has_offscreen_renderer'] = False
-        empty_env_kwargs['has_renderer'] = False
-        empty_env_kwargs['use_camera_obs'] = False
         self.empty_env = suite.make(**empty_env_kwargs)
         self.empty_env.copy_env_model(self.env)
         self.reset()
@@ -54,13 +48,19 @@ class RobosuitePoseWrapper(RobosuiteImageWrapper):
         for key in self.observation_space.keys():
             if "image" in key and 'robot' not in key:
                 self.camera_names.append(key.replace("_image", ""))
-                
-    def set_robot(self):
-        return {"qpos": self.empty_env.copy_robot_state(self.env)}
-    
-    def render_action_pose(self, actions, set_robot=False):
+
+    def set_robot(self, robot_state=None):
+        return self.empty_env.copy_robot_state(env=self.env if robot_state is None else None, robot_state=robot_state)
+
+    def get_robot_state(self):
+        return {'robot_state': self.empty_env.get_robot_state(env=self.env)}
+
+    def get_simulation_robot_state(self):
+        return {'robot_state': self.empty_env.get_robot_state()}
+
+    def render_action_pose(self, actions, set_robot=False, robot_state=None):
         if set_robot:
-            self.set_robot()
+            self.set_robot(robot_state)
         self.simulation_step(actions)
         return self.render_simulation_pose()
 

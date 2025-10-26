@@ -122,7 +122,8 @@ class ConcurrentEnvs:
                 for key, value in env_results.items():
                     results[key].append(value)
         for key in results:
-            results[key] = np.stack(results[key], axis=0)
+            if isinstance(results[key][0], np.ndarray):
+                results[key] = np.stack(results[key], axis=0)
         return dict(results)
 
     def close(self):

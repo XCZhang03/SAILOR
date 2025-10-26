@@ -21,12 +21,12 @@ defaults:
   viz_expert_buffer: False
   update_dp: False
   train_dp_mppi: False
-  state_only: False
+  state_only: True
   generate_highres_eval: False
 
   # Data params
-  num_exp_trajs: 10 # To be specified when starting a new run
-  num_exp_val_trajs: 1
+  num_exp_trajs: 1000 # To be specified when starting a new run
+  num_exp_val_trajs: 100
   normalize_state_actions: False
   image_size: 128
   obs_horizon: 2 # Number of observations to stack
@@ -42,7 +42,7 @@ defaults:
   log_every: 50
 
   # Environment
-  task: 'robomimic__can' # To be specified when starting a new run
+  task: 'libero_90__1-40' # To be specified when starting a new run
   num_envs: 10
   time_limit: -1 # overwritten for each env, defined below
   high_res_render: False # If true, videos will be stored in high resolution
@@ -94,10 +94,10 @@ defaults:
 
   # DP Config
   dp:
-    train_steps: 1000000
+    train_steps: 240000
     batch_size: 256
     lr: 0.0001
-    max_iterations: 500000
+    max_iterations: 120000
     log_freq: 100
     eval_freq: 5000
     schedule_freq: 1
@@ -108,6 +108,7 @@ defaults:
     ac_chunk: 8
     img_chunk: 2
     num_cams: 1
+    use_obs: True
     train_transform: 'gpu_medium'
     debug: False
     print_config: False
@@ -239,7 +240,7 @@ debug:
   eval_num_runs: 3
   steps_per_batch: 10
   train_ratio: 50
-  num_envs: 1
+  num_envs: 3
   num_buffer_transitions: 50
   visualize_eval: False
 

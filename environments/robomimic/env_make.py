@@ -54,8 +54,14 @@ def make_env_robomimic(
         env_kwargs["camera_widths"] = config.highres_img_size
 
     env = suite.make(**env_kwargs)
+    empty_env_kwargs = env_kwargs.copy()
+    empty_env_kwargs['env_name'] = "EmptyEnv"
+    empty_env_kwargs['hard_reset'] = False
+    empty_env_kwargs['has_offscreen_renderer'] = False
+    empty_env_kwargs['has_renderer'] = False
+    empty_env_kwargs['use_camera_obs'] = False
     env = RobosuitePoseWrapper(
-        env_kwargs, env, keys=obs_keys, shape_meta=shape_meta, add_state=add_state, config=config
+        empty_env_kwargs, env, keys=obs_keys, shape_meta=shape_meta, add_state=add_state, config=config
     )
     cprint(
         f"Initialized robomimic env with action repeat: {config.action_repeat}, time limit: {config.time_limit}",

@@ -390,11 +390,29 @@ def save_trajectory_video(
     frame_skip=2,
     save_dir="./videos",
 ):
+    import os, fcntl
+
+    def get_next_index(counter_path, num_files):
+        with open(counter_path, 'a+') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.seek(0)
+            data = f.read().strip()
+            index = int(data) if data else len([f for f in os.listdir(os.path.dirname(counter_path)) if f.endswith('.mp4')])
+            next_index = index + num_files
+            f.seek(0)
+            f.truncate()
+            f.write(str(next_index))
+            f.flush()
+            fcntl.flock(f, fcntl.LOCK_UN)
+        return index
+
+    counter_path = os.path.join(save_dir, 'counter.txt')
+
     num_envs = len(obs_traj)
     pose_save_dir = save_dir + "_pose"
     os.makedirs(pose_save_dir, exist_ok=True)
     os.makedirs(save_dir, exist_ok=True)
-    file_cnt = len(os.listdir(save_dir))
+    file_cnt = get_next_index(counter_path, num_envs)
     for env_idx in range(num_envs):
         frames = []
         pose_frames = []
@@ -405,11 +423,11 @@ def save_trajectory_video(
             pose_img = obs_traj[env_idx]["agentview_image_pose"][t]
             frames.append(img)
             pose_frames.append(pose_img)
-        save_path = os.path.join(save_dir, f"{file_cnt}.mp4")
-        pose_save_path = os.path.join(pose_save_dir, f"{file_cnt}.mp4")
+        save_path = os.path.join(save_dir, f"{file_cnt + env_idx}.mp4")
+        pose_save_path = os.path.join(pose_save_dir, f"{file_cnt + env_idx}.mp4")
         imageio.mimwrite(save_path, frames, fps=4)
         imageio.mimwrite(pose_save_path, pose_frames, fps=4)
-        file_cnt += 1
+        
 
 def collect_wm_trajs(
     num_steps,
@@ -504,8 +522,6 @@ def collect_wm_trajs(
     print(
         f"Time taken to collect {n_step_collected}/{num_steps} steps and {n_trajs} trajectories: {time.time() - start_time:.2f} seconds"
     )
-    train_videos, val_videos = split_train_val(save_dir, val_ratio=0.1)
-    print(f"Train videos: {len(train_videos)}, Val videos: {len(val_videos)}")
     
     return n_step_collected
 

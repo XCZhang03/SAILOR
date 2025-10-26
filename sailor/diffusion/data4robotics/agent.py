@@ -154,6 +154,8 @@ class Agent(nn.Module):
         self.obs_enc_dim = mlp_def[-1]
         self.state_only = state_only
 
+        self.seed = None
+
     def forward(self, imgs, obs, ac_flat, mask_flat):
         s_t = self._shared_forward(imgs, obs)
         action_dist = self._policy(s_t)

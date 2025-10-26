@@ -53,7 +53,7 @@ class WeightedActionWrapper:
         Input: num_envs x ...
         """
         assert (
-            obs["agentview_image"].shape[0] == self.num_envs
+            obs["agentview_image"].shape[0] if "agentview_image" in obs else obs["state"].shape[0] == self.num_envs
         ), "Batch size mismatch in observations"
 
         # Get stacked images based on images seen by the WeigtedActionWrapper
@@ -80,7 +80,8 @@ class WeightedActionWrapper:
                 obs[key] = np.stack(stacked_images[key], axis=0)
 
         # Unsqueeze state for preprocessing
-        # obs["state"] = obs["state"][:, None, ...]  # (num_envs, 1, ...)
+        if "state" in obs.keys():
+            obs["state"] = obs["state"][:, None, ...]  # (num_envs, 1, ...)
 
         # Preprocess the data (input shape is [num_envs x obs_horizon x ...])
         obs = self.preprocessor.preprocess_batch(obs, training=False)
@@ -96,8 +97,8 @@ class WeightedActionWrapper:
         else:
             images = None
 
-        # state = obs["state"][:, -1, :].to(torch.float32)  # Take the last state
-        return images, None
+        state = obs["state"][:, -1, :].to(torch.float32) if "state" in obs else None  # Take the last state
+        return images, state
 
     def get_weighted_action(self, ac, env_id, get_full_action=False):
         """
@@ -156,7 +157,7 @@ class WeightedActionWrapper:
         """
         # If buffers are None, initialize them and set num_envs
         if self.image_history is None or self.act_history is None:
-            self.num_envs = obs["agentview_image"].shape[0]
+            self.num_envs = obs["agentview_image"].shape[0] if "agentview_image" in obs else obs["state"].shape[0]
             self.image_history = defaultdict(
                 lambda: [deque(maxlen=self.obs_horizon) for _ in range(self.num_envs)]
             )
@@ -290,7 +291,7 @@ class DiffusionBasePolicy:
             shared_mlp=self.config.dp["shared_mlp"],
             odim=self.state_dim,
             n_cams=self.config.dp["num_cams"],
-            use_obs=False,
+            use_obs=self.config.dp["use_obs"],
             dropout=0.1,
             train_diffusion_steps=100,
             eval_diffusion_steps=16,

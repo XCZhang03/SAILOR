@@ -187,7 +187,7 @@ class Preprocessor:
         else:
             imgs = None
 
-        obs = batch["state"][:, -1, :].to(torch.float32)  # Take the last state
+        obs = batch["state"][:, -1, :].to(torch.float32) if "state" in batch else None  # Take the last state
         actions = batch["action"].to(torch.float32)
         mask = torch.ones_like(actions).to(torch.float32)  # No mask for now
         return (imgs, obs), actions, mask
