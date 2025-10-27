@@ -83,7 +83,9 @@ class RobosuitePoseWrapper(RobosuiteImageWrapper):
         if len(actions.shape) == 1:
             actions = actions[None, :]
         for action in actions:
-            self.empty_env.step(action)
+            raw_obs, reward, done, info = self.empty_env.step(action)
+            obs = self.get_observation(raw_obs)
+        return obs
     
     def step(self, action, step_simulation=False):
         returns = super().step(action)

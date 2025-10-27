@@ -108,7 +108,7 @@ class RobosuiteImageWrapper(GymWrapper):
             self.images_are_mirrored = False
 
     def get_observation(self, raw_obs):
-        self.render_cache = raw_obs[self.render_obs_key]
+        # self.render_cache = raw_obs[self.render_obs_key]
         obs = OrderedDict()
         for observation_space_key in self.observation_space.keys():
             if observation_space_key == "state":
@@ -133,12 +133,13 @@ class RobosuiteImageWrapper(GymWrapper):
             else:
                 # (C, H, W) -> (H, W, C)
                 # obs[key] = np.transpose(raw_obs[key], (1, 2, 0))
-                if self.images_are_mirrored:
-                    obs[observation_space_key] = np.flipud(
-                        raw_obs[observation_space_key]
-                    )
-                else:
-                    obs[observation_space_key] = raw_obs[observation_space_key]
+                if observation_space_key in raw_obs:
+                    if self.images_are_mirrored:
+                        obs[observation_space_key] = np.flipud(
+                            raw_obs[observation_space_key]
+                        )
+                    else:
+                        obs[observation_space_key] = raw_obs[observation_space_key]
 
         return obs
 

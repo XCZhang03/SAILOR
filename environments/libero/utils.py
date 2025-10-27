@@ -129,7 +129,7 @@ def make_env_libero(
     }
     env = OffScreenRenderEnv(**env_kwargs).env
 
-    empty_env_kwargs = {}
+    empty_env_kwargs = env_meta['env_kwargs'].copy()
     empty_env_kwargs['env_name'] = "SingleArmEmptyEnv"
     empty_env_kwargs['hard_reset'] = False
     empty_env_kwargs['has_offscreen_renderer'] = False
