@@ -16,6 +16,7 @@ class ResNetEncoder(nn.Module):
         num_cams: int = 2,
         share_cam_features: bool = False,
         device: str = "cpu",
+        feature_dim: int = 64,
     ):
         super(ResNetEncoder, self).__init__()
 
@@ -26,7 +27,7 @@ class ResNetEncoder(nn.Module):
                 "name": "diffusion_policy",
             },
             img_size=224,
-            feature_dim=64,
+            feature_dim=feature_dim,
         ).to(device)
 
         self._share_cam_features = share_cam_features
@@ -74,3 +75,28 @@ class ResNetEncoder(nn.Module):
             ]
 
         return torch.cat(embeds, dim=1)
+
+class VQResNetEncoder(ResNetEncoder):
+    def __init__(
+        self,
+        obs_chunk: int = 2,
+        num_cams: int = 2,
+        share_cam_features: bool = False,
+        device: str = "cpu",
+        feature_dim: int = 64,
+        codebook_size: int = 512
+    ):
+        super(VQResNetEncoder, self).__init__(
+            obs_chunk=obs_chunk,
+            num_cams=num_cams,
+            share_cam_features=share_cam_features,
+            device=device,
+            feature_dim=feature_dim,
+        )
+        from vector_quantize_pytorch import VectorQuantize
+        self.vq_bottleneck = VectorQuantize(dim=self.embed_dim, codebook_size=codebook_size, threshold_ema_dead_code=2)
+
+    def forward(self, imgs):
+        features = super().forward(imgs)
+        quantized_features, indices, loss = self.vq_bottleneck(features)
+        return quantized_features, loss

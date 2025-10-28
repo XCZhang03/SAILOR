@@ -10,6 +10,8 @@ import torch
 from termcolor import cprint
 from torch import nn
 
+from sailor.classes.resnet_encoder import VQResNetEncoder
+
 # Residual MLP adapted from https://github.com/irom-princeton/dppo/blob/e7f73dffc131570ef7129d5ed1bc98a05cf030ab/model/common/mlp.py#L86
 activation_dict = nn.ModuleDict(
     {
@@ -172,17 +174,19 @@ class Agent(nn.Module):
 
     def _shared_forward(self, imgs, obs):
         if not self.state_only:
+            img_feat, loss = self.embed(imgs) if isinstance(self.visual_feature_net, VQResNetEncoder) else (self.embed(imgs), None)
             shared_in = (
-                torch.cat((self.embed(imgs), obs), dim=1)
+                torch.cat((img_feat, obs), dim=1)
                 if self._use_obs
-                else self.embed(imgs)
+                else img_feat
             )
         elif self._use_obs:
             shared_in = obs
+            loss = None
         else:
-            return None
+            return None, None
 
-        return self._shared_mlp(shared_in)
+        return self._shared_mlp(shared_in), loss
 
     def embed(self, imgs):
         return self.visual_feature_net(imgs)

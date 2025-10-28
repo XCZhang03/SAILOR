@@ -373,7 +373,7 @@ class DiffusionUnetAgent(Agent):
         # get observation encoding and sample noise/timesteps
         # B, device = obs.shape[0], obs.device
         B, device = imgs['cam0'].shape[0] if imgs is not None else obs.shape[0], imgs['cam0'].device if imgs is not None else obs.device
-        s_t = self._shared_forward(imgs, obs)
+        s_t, enc_loss = self._shared_forward(imgs, obs)
         timesteps = torch.randint(
             low=0, high=self._train_diffusion_steps, size=(B,), device=device
         ).long()
@@ -391,7 +391,10 @@ class DiffusionUnetAgent(Agent):
         loss = nn.functional.mse_loss(noise_pred, noise, reduction="none")
         loss = (loss * mask).sum((1, 2))  # mask the loss to only consider "real" acs
 
-        return loss.mean()
+        if enc_loss is not None:
+            loss = loss.mean() + enc_loss
+
+        return loss
 
     def debug_batch(self, img, obs, savestr="train"):
         import matplotlib.pyplot as plt
@@ -418,7 +421,7 @@ class DiffusionUnetAgent(Agent):
         # get observation encoding and sample noise
         # B, device = obs.shape[0], obs.device
         B, device = imgs['cam0'].shape[0] if imgs is not None else obs.shape[0], imgs['cam0'].device if imgs is not None else obs.device
-        s_t = self._shared_forward(imgs, obs)
+        s_t, enc_loss = self._shared_forward(imgs, obs)
         noise_actions = torch.randn(B, self.ac_chunk, self.ac_dim, device=device)
 
         # set number of steps
