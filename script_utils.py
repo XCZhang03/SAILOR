@@ -11,59 +11,22 @@ sys.path.append(
 )  # For diffusion4robotics imports
 
 import numpy as np
-import ruamel.yaml as yaml
-yaml = yaml.YAML(typ="safe", pure=True)  # For loading configs
-import torch
+from omegaconf import OmegaConf
 from termcolor import cprint
 
 import environments.wrappers as wrappers
-import sailor.dreamer.tools as tools
 from environments.concurrent_envs import ConcurrentEnvs
 from environments.global_utils import save_demo_videos
 from sailor.classes.preprocess import Preprocessor
 from sailor.classes.resnet_encoder import ResNetEncoder, VQResNetEncoder
 from sailor.policies.diffusion_base_policy import DiffusionBasePolicy
-from sailor.sailor_trainer import SAILORTrainer
 
 # Force EGL rendering in environments
 os.environ["MUJOCO_GL"] = "egl"
 os.environ["PYOPENGL_PLATFORM"] = "egl"
 
 
-def train_eval(config):
-    tools.set_seed_everywhere(config.seed)
-    if config.deterministic_run:
-        tools.enable_deterministic_run()
-    logdir = pathlib.Path(config.logdir).expanduser()
-
-    # ==================== Logging ====================
-    print("Logdir", logdir)
-    logdir.mkdir(parents=True, exist_ok=True)
-
-    with open(f"{logdir}/config.yaml", "w") as f:
-        yaml.dump(vars(config), f)
-
-    config.logdir = logdir
-    log_step = 0
-    config.scratch_dir = pathlib.Path(config.scratch_dir).expanduser()
-    logger = tools.Logger(config) if config.use_wandb else None
-
-    print("---------------------")
-    cprint(f"Task: {config.task}", "cyan", attrs=["bold"])
-    cprint(f"Logging to: {config.logdir}", "cyan", attrs=["bold"])
-    cprint(
-        f"Time Limit: {config.time_limit} | Max Env Steps: {config.train_dp_mppi_params['n_env_steps']}",
-        "cyan",
-        attrs=["bold"],
-    )
-    if config.visualize_eval:
-        cprint(
-            f"WARNING: Saving videos of evaluation episodes, please turn off if not needed. High resolution render is {config.high_res_render}",
-            "red",
-            attrs=["bold"],
-        )
-    print("---------------------")
-
+def create_datasets_and_envs(config):
     # ==================== Create Datasets ====================
     # Check if task can be split by __ else raise error
     if "__" not in config.task:
@@ -98,10 +61,9 @@ def train_eval(config):
         )
     else:
         raise ValueError(f"Unknown env suite {suite}")
-
     # Set correct values of state_dim and action_dim
-    config.state_dim = state_dim
-    config.action_dim = action_dim
+    config.state_dim = int(state_dim)
+    config.action_dim = int(action_dim)
     cprint(f"Enviroment State Dim: {state_dim}, Action Dim: {action_dim}", "cyan")
 
     if config.viz_expert_buffer:
@@ -142,106 +104,44 @@ def train_eval(config):
     acts = envs.action_space
     print(f"Action Space: {acts}. Low: {acts.low}. High: {acts.high}")
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
+    return expert_eps, expert_val_eps, envs
 
-    # ============ Diffusion Policy Pretraining ===============
-    # If checkpoint is not provided, train the DP
-    if config.dp["pretrained_ckpt"] == "":
+def init_dp(config, state_dim=None, action_dim=None, **kwargs):
+    # Initialize DP
+    preprocessor = Preprocessor(config=config)
+    if config.state_only:
+        encoder = None
+    elif config.dp.get("quantize_image_features", False):
+        encoder = VQResNetEncoder(num_cams=config.dp.num_cams)
+    else:
+        encoder = ResNetEncoder(num_cams=config.dp.num_cams)
+    base_policy = DiffusionBasePolicy(
+        preprocessor=preprocessor,
+        encoder=encoder,
+        config=config,
+        device=config.device,
+        state_dim=state_dim if state_dim is not None else config.get("state_dim", None),
+        action_dim=action_dim if action_dim is not None else config.get("action_dim", None),
+        name="DP_Pretrain",
+        logger=kwargs.pop("logger", None),
+        **kwargs
+    )
+    if config.dp.pretrained_ckpt != "":
         cprint(
-            "----------------No base policy path provided, begin training diffusion policy--------------",
+            f"Loading pretrained diffusion policy from {config.dp.pretrained_ckpt}",
             "yellow",
             attrs=["bold"],
         )
-        # Initialize DP
-        preprocessor = Preprocessor(config=config)
-        if config.state_only:
-            encoder = None
-        elif config.dp['quantize_image_features']:
-            encoder = VQResNetEncoder(num_cams=config.dp['num_cams'])
-        else:
-            encoder = ResNetEncoder(num_cams=config.dp['num_cams'])
-        base_policy = DiffusionBasePolicy(
-            preprocessor=preprocessor,
-            encoder=encoder,
-            config=config,
-            device=config.device,
-            state_dim=state_dim,
-            action_dim=action_dim,
-            logger=logger,
-            name="DP_Pretrain",
+        base_policy.trainer.load_checkpoint(
+            config.dp.pretrained_ckpt
         )
-
-        # Train it
-        expert_dataset_dp = tools.make_dataset(
-            expert_eps, batch_length=1, batch_size=config.dp["batch_size"]
-        )
-        log_step = base_policy.train_base_policy(
-            train_dataset=expert_dataset_dp,
-            expert_val_eps=expert_val_eps,
-            eval_envs=envs,
-            log_prefix="dp_pretrain",
-        )
-
-        # Store the saved pretrained checkpoint path
-        config.dp["pretrained_ckpt"] = os.path.relpath(
-            base_policy.ckpt_file, config.scratch_dir
-        )
-
-        # Cleanup
-        del preprocessor
-        del encoder
-        del base_policy
-        torch.cuda.empty_cache()
-        gc.collect()
-
-    # ============ SAILOR Training ===============
-    if config.train_dp_mppi:
+    else:
         cprint(
-            "\n-----------------Begin training SAILOR --------------",
+            "No pretrained diffusion policy checkpoint provided.",
             "yellow",
             attrs=["bold"],
         )
-        # Create buffer
-        train_eps = collections.OrderedDict()
-
-        # Build trainer
-        trainer = SAILORTrainer(
-            config=config,
-            expert_eps=expert_eps,
-            state_dim=state_dim,
-            action_dim=action_dim,
-            train_env=envs,
-            eval_envs=envs,
-            expert_val_eps=expert_val_eps,
-            train_eps=train_eps,
-            init_step=log_step,
-            logger=logger,
-        )
-
-        # Run train loop
-        trainer.train_dp_with_mppi()
-
-    envs.close()
-    cprint("--------Finished Everything--------", "yellow", attrs=["bold"])
-
-
-def close_envs(envs):
-    for env in envs:
-        try:
-            env.close()
-        except Exception:
-            pass
-
-
-def count_steps(folder):
-    return sum(int(str(n).split("-")[-1][:-4]) - 1 for n in folder.glob("*.npz"))
-
-
-def recursive_update(base, update):
-    for key, value in update.items():
-        if isinstance(value, dict) and key in base:
-            recursive_update(base[key], value)
-        else:
-            base[key] = value
+    return base_policy
 
 
 def make_env(config):
@@ -312,95 +212,35 @@ def make_env(config):
     return env
 
 
-# Function to update nested dictionary values based on multi-level keys
-def update_nested_obj(obj, key_str, value):
-    keys = key_str.split(".")
-
-    # Traverse down the nested object attributes or dictionary
-    for key in keys[:-1]:
-        if isinstance(obj, dict):
-            obj = obj[key]  # Handle dictionary
-        else:
-            obj = getattr(obj, key)  # Handle object attributes
-
-    # Update the final key/attribute
-    final_key = keys[-1]
-    if isinstance(obj, dict):
-        # Throw error if key is not present in dictionary
-        if final_key not in obj:
-            raise KeyError(f"Key '{keys}' not found in dictionary during --set")
-        obj[final_key] = value  # Set value for dictionary
-    else:
-        if not hasattr(obj, final_key):
-            raise AttributeError(f"Attribute '{keys}' not found in object during --set")
-        setattr(obj, final_key, value)  # Set value for object attribute
-
-    print(f"Set {key_str} to {value}")
-
-
-# Function to convert string values from --set to appropriate type
-def convert_type(value):
-    if value.lower() == "true":
-        return True
-    elif value.lower() == "false":
-        return False
-    try:
-        return int(value)
-    except ValueError:
-        try:
-            return float(value)
-        except ValueError:
-            return value  # Return as string if it's neither int nor float
-
 def get_config(**kwargs):
     parser = argparse.ArgumentParser()
-    parser.add_argument("--configs", nargs="+", default=['cfg_dp_mppi', 'robomimic', 'debug'])
+    parser.add_argument("--configs", nargs="+", default=['robomimic', 'debug'])
     parser.add_argument("--exp_name", type=str, default='test')
     parser.add_argument("--resume_run", type=bool, default=False)
     args, remaining = parser.parse_known_args()
 
-    configs = yaml.load(
-        (pathlib.Path(sys.argv[0]).parent / "sailor/configs.yaml").read_text()
+    configs = OmegaConf.load(
+        (pathlib.Path(sys.argv[0]).parent / "sailor/configs.yaml")
     )
 
     name_list = ["defaults", *args.configs] if args.configs else ["defaults"]
 
-    defaults = {}
-    for name in name_list:
-        recursive_update(defaults, configs[name])
-    parser = argparse.ArgumentParser()
-    # Use nargs='+' to collect multi-level keys and values
-    parser.add_argument(
-        "--set",
-        nargs="+",
-        action="append",
-        help="Set a configuration key, e.g. --set residual_training.actor_loss_anneal True",
-    )
+    defaults = OmegaConf.merge(*[configs.get(name) for name in name_list])
 
-    for key, value in sorted(defaults.items(), key=lambda x: x[0]):
-        arg_type = tools.args_type(value)
-        parser.add_argument(f"--{key}", type=arg_type, default=arg_type(value))
-    final_config = parser.parse_known_args(remaining)[0]
+    final_config = OmegaConf.merge(defaults, OmegaConf.from_cli(remaining))
 
     # Set mppi["horizon"] = pred_horizon and dp["ac_chunk"] = pred_horizon
-    final_config.mppi["horizon"] = final_config.pred_horizon
-    final_config.dp["ac_chunk"] = final_config.pred_horizon
-
-    # Update args passed through --set
-    if final_config.set:
-        for set_arg in final_config.set:
-            key_str = set_arg[0]  # e.g., "residual_training.actor_loss_anneal"
-            value_str = set_arg[1]  # e.g., "True"
-            value = convert_type(value_str)
-            update_nested_obj(final_config, key_str, value)
+    final_config.mppi.horizon = final_config.pred_horizon
+    final_config.dp.ac_chunk = final_config.pred_horizon
 
     # Set Wandb Stuff
-    exp_name = f"{str(final_config.task).lower()}/{final_config.wandb_exp_name}_demos{final_config.num_exp_trajs}"
+    exp_name = f"{str(final_config.task).lower()}/{args.exp_name}_demos{final_config.num_exp_trajs}"
     final_config.wandb_exp_name = f"{exp_name}"
 
     # Set time limit
     suite, task = final_config.task.split("__", 1)
     task = task.lower()
+
     if suite == "robomimic":
         final_config.time_limit = final_config.env_time_limits[task]
 
@@ -424,16 +264,13 @@ def get_config(**kwargs):
 
     if final_config.generate_highres_eval:
         final_config.high_res_render = True
-
-    # Set max steps
-    if not final_config.debug:
-        final_config.train_dp_mppi_params["n_env_steps"] = final_config.env_max_steps[
-            task.lower()
-        ]
+    
     return final_config
 
 if __name__ == "__main__":
     final_config = get_config()
-    train_eval(final_config)
+    train_eps, val_eps, envs, final_config = create_datasets_and_envs(
+        final_config
+    )
     with contextlib.redirect_stderr(open(os.devnull, "w")):
         gc.collect()  # Force garbage collection to run

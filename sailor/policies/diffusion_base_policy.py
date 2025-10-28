@@ -288,16 +288,16 @@ class DiffusionBasePolicy:
         # Instantiate the agent
         diffusion_unet = DiffusionUnetAgent(
             features=encoder,
-            shared_mlp=self.config.dp["shared_mlp"],
+            shared_mlp=self.config.dp.shared_mlp,
             odim=self.state_dim,
-            n_cams=self.config.dp["num_cams"],
-            use_obs=self.config.dp["use_obs"],
+            n_cams=self.config.dp.num_cams,
+            use_obs=self.config.dp.use_obs,
             dropout=0.1,
             train_diffusion_steps=100,
             eval_diffusion_steps=16,
             ac_dim=self.action_dim,
-            ac_chunk=self.config.dp["ac_chunk"],
-            imgs_per_cam=self.config.dp["img_chunk"],
+            ac_chunk=self.config.dp.ac_chunk,
+            imgs_per_cam=self.config.dp.img_chunk,
             share_cam_features=False,
             feat_batch_norm=False,
             noise_net_kwargs={
