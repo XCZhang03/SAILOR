@@ -21,7 +21,7 @@ import sailor.dreamer.tools as tools
 from environments.concurrent_envs import ConcurrentEnvs
 from environments.global_utils import save_demo_videos
 from sailor.classes.preprocess import Preprocessor
-from sailor.classes.resnet_encoder import ResNetEncoder
+from sailor.classes.resnet_encoder import ResNetEncoder, VQResNetEncoder
 from sailor.policies.diffusion_base_policy import DiffusionBasePolicy
 from sailor.sailor_trainer import SAILORTrainer
 
@@ -153,7 +153,12 @@ def train_eval(config):
         )
         # Initialize DP
         preprocessor = Preprocessor(config=config)
-        encoder = None if config.state_only else ResNetEncoder(num_cams=config.dp['num_cams'])                    
+        if config.state_only:
+            encoder = None
+        elif config.dp['quantize_image_features']:
+            encoder = VQResNetEncoder(num_cams=config.dp['num_cams'])
+        else:
+            encoder = ResNetEncoder(num_cams=config.dp['num_cams'])
         base_policy = DiffusionBasePolicy(
             preprocessor=preprocessor,
             encoder=encoder,
