@@ -393,6 +393,8 @@ class DiffusionUnetAgent(Agent):
 
         if enc_loss is not None:
             loss = loss.mean() + enc_loss
+        else:
+            loss = loss.mean()
 
         return loss
 

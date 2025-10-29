@@ -42,7 +42,7 @@ defaults:
   log_every: 50
 
   # Environment
-  task: 'robomimic__can' # To be specified when starting a new run
+  task: 'libero_90__1-40' # To be specified when starting a new run
   num_envs: 10
   time_limit: -1 # overwritten for each env, defined below
   high_res_render: False # If true, videos will be stored in high resolution
@@ -160,44 +160,8 @@ debug:
     train_steps: 10
     eval_freq: 10
   
-  encoder_net:
-    train_steps: 10
-    eval_interval: 2
-  
   use_wandb: False
 
-  mppi:
-    # planning
-    iterations: 2
-    num_elites: 2
-    temperature: 0.5
-    num_samples: 32
+  
 
-  residual_training:
-    # Warmup
-    num_warmup_trajs: 3
-    warmstart_critic_loss: -10000
-    max_warmup_itrs: 100
-
-    # Training
-    num_trajs_per_round: 3
-    n_training_rounds: 3
-    n_steps_per_round: 100
-
-  retrain_dp_params:
-    new_trajs_to_collect: 3
-
-  train_dp_mppi_params:
-    # Warmstart
-    force_warmup: True # TODO: change to false after formalizing critic
-    n_env_steps: 230
-    min_env_steps_per_round: 20
-    update_dp_every: 2
-    n_dp_train_itrs: 10
-    eval_every_round: 2
-
-    n_traj_to_relabel_per_round: 3
-    n_dp_traj_buffer_size: 6
-
-    use_discrim: true
-    upate_discrim_every: 2
+  
