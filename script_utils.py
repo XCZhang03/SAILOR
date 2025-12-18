@@ -14,12 +14,14 @@ import numpy as np
 from omegaconf import OmegaConf
 from termcolor import cprint
 
+import robomimic.utils.file_utils as FileUtils
+
 import environments.wrappers as wrappers
 from environments.concurrent_envs import ConcurrentEnvs
 from environments.global_utils import save_demo_videos
-from sailor.classes.preprocess import Preprocessor
-from sailor.classes.resnet_encoder import ResNetEncoder, VQResNetEncoder
-from sailor.policies.diffusion_base_policy import DiffusionBasePolicy
+# from sailor.classes.preprocess import Preprocessor
+# from sailor.classes.resnet_encoder import ResNetEncoder, VQResNetEncoder
+# from sailor.policies.diffusion_base_policy import DiffusionBasePolicy
 
 # Force EGL rendering in environments
 os.environ["MUJOCO_GL"] = "egl"
@@ -106,42 +108,42 @@ def create_datasets_and_envs(config):
     config.num_actions = acts.n if hasattr(acts, "n") else acts.shape[0]
     return expert_eps, expert_val_eps, envs
 
-def init_dp(config, state_dim=None, action_dim=None, **kwargs):
-    # Initialize DP
-    preprocessor = Preprocessor(config=config)
-    if config.state_only:
-        encoder = None
-    elif config.dp.get("quantize_image_features", False):
-        encoder = VQResNetEncoder(num_cams=config.dp.num_cams)
-    else:
-        encoder = ResNetEncoder(num_cams=config.dp.num_cams)
-    base_policy = DiffusionBasePolicy(
-        preprocessor=preprocessor,
-        encoder=encoder,
-        config=config,
-        device=config.device,
-        state_dim=state_dim if state_dim is not None else config.get("state_dim", None),
-        action_dim=action_dim if action_dim is not None else config.get("action_dim", None),
-        name="DP_Pretrain",
-        logger=kwargs.pop("logger", None),
-        **kwargs
-    )
-    if config.dp.pretrained_ckpt != "":
-        cprint(
-            f"Loading pretrained diffusion policy from {config.dp.pretrained_ckpt}",
-            "yellow",
-            attrs=["bold"],
-        )
-        base_policy.trainer.load_checkpoint(
-            config.dp.pretrained_ckpt
-        )
-    else:
-        cprint(
-            "No pretrained diffusion policy checkpoint provided.",
-            "yellow",
-            attrs=["bold"],
-        )
-    return base_policy
+# def init_dp(config, state_dim=None, action_dim=None, **kwargs):
+#     # Initialize DP
+#     preprocessor = Preprocessor(config=config)
+#     if config.state_only:
+#         encoder = None
+#     elif config.dp.get("quantize_image_features", False):
+#         encoder = VQResNetEncoder(num_cams=config.dp.num_cams)
+#     else:
+#         encoder = ResNetEncoder(num_cams=config.dp.num_cams)
+#     base_policy = DiffusionBasePolicy(
+#         preprocessor=preprocessor,
+#         encoder=encoder,
+#         config=config,
+#         device=config.device,
+#         state_dim=state_dim if state_dim is not None else config.get("state_dim", None),
+#         action_dim=action_dim if action_dim is not None else config.get("action_dim", None),
+#         name="DP_Pretrain",
+#         logger=kwargs.pop("logger", None),
+#         **kwargs
+#     )
+#     if config.dp.pretrained_ckpt != "":
+#         cprint(
+#             f"Loading pretrained diffusion policy from {config.dp.pretrained_ckpt}",
+#             "yellow",
+#             attrs=["bold"],
+#         )
+#         base_policy.trainer.load_checkpoint(
+#             config.dp.pretrained_ckpt
+#         )
+#     else:
+#         cprint(
+#             "No pretrained diffusion policy checkpoint provided.",
+#             "yellow",
+#             attrs=["bold"],
+#         )
+#     return base_policy
 
 
 def make_env(config):
@@ -153,13 +155,14 @@ def make_env(config):
         from environments.robomimic.utils import (
             create_shape_meta, get_robomimic_dataset_path_and_env_meta)
 
-        dataset_path, env_meta = get_robomimic_dataset_path_and_env_meta(
-            env_id=task,
-            shaped=config.shape_rewards,
-            image_size=config.image_size,
-            done_mode=config.done_mode,
-            datadir=config.datadir,
-        )
+        # dataset_path, env_meta = get_robomimic_dataset_path_and_env_meta(
+        #     env_id=task,
+        #     shaped=config.shape_rewards,
+        #     image_size=config.image_size,
+        #     done_mode=config.done_mode,
+        #     datadir=config.datadir,
+        # )
+        env_meta = FileUtils.get_env_metadata_from_dataset(dataset_path=config.dataset_path)
         shape_meta = create_shape_meta(img_size=config.image_size, include_state=True)
 
         shape_rewards = config.shape_rewards

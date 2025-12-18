@@ -1,6 +1,6 @@
 # General
 __pycache__/
-wandb**
+*wandb**
 .gitattributes
 
 # SAILOR specific
@@ -25,3 +25,5 @@ datasets
 .vscode
 
 env_repos/
+
+*.mp4

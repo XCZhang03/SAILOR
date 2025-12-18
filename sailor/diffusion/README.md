@@ -1,1 +1,0 @@
-The implementation of the diffusion process of the Diffusion Poliy is in this directory and this code is adapted from [data4robotics](https://github.com/SudeepDasari/data4robotics/tree/main/data4robotics).

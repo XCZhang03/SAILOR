@@ -167,6 +167,8 @@ def update_demo_keys(demo) -> Dict[str, Any]:
         if key in KEYS_MAP:
             new_key = KEYS_MAP[key]
             new_obs[new_key] = np.array(obs[key])
+            if 'rgb' in key:
+                new_obs[new_key] = new_obs[new_key][:, ::-1, :, :]  # flip image
     new_obs['robot0_eef_quat'] = [T.axisangle2quat(ori) for ori in new_obs['robot0_eef_ori']]
     new_obs['robot0_eef_quat'] = np.array(new_obs['robot0_eef_quat'], dtype=np.float32)
     
