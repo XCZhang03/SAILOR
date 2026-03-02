@@ -12,6 +12,7 @@ from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 
 from vlm_api import call_api
+from vlm_utils import *
 
 prompt_base = """- Part 0: Instruction
 You are a robotics expert, and you are here given a robot manipulation task.
@@ -42,30 +43,6 @@ prompt_proposal = """- Part 3: Action Proposal
 
     First reason from the multiview images and analyze, and then return the json output.
     """
-
-def numpy_to_jpeg_bytes(img_array):
-    """Convert numpy image array to JPEG bytes."""
-    buf = io.BytesIO()
-    Image.fromarray(img_array).save(buf, format='JPEG', quality=90)
-    return buf.getvalue()
-
-def get_json(response_text):
-    import re
-    import json
-    # Use regular expression to extract the JSON part from the response text
-    json_pattern = r'```json\s*(.*?)\s*```'
-    match = re.search(json_pattern, response_text, re.DOTALL)
-    if match:
-        json_str = match.group(1)
-        try:
-            output = json.loads(json_str)
-            return output
-        except json.JSONDecodeError:
-            print("Failed to decode JSON.")
-            return None
-    else:
-        print("No JSON found in the response.")
-        return None
 
 class VLMAgent:
     def __init__(self, 
@@ -104,6 +81,29 @@ class VLMAgent:
         end_obs = env.set_init_state(states[-1])
         end_image_agentview = end_obs['agentview_image'][::-1]
         end_image_topview = end_obs['birdview_image'][::-1]
+        
+        # get asset images
+        assets_dir = get_libero_path("assets")
+        print(assets_dir)
+        asset_contents = []
+        for object_name, object_item in env.env.objects_dict.items():
+            object_name = " ".join(object_name.split("_")[:-1])  # Remove the trailing number from the object name
+            if object_name in self.task_description:
+                object_name = object_name.replace(" ", "_")  # Replace spaces with underscores to match the asset file names
+                object_class = str(object_item.__class__)
+                if "hope_objects" in object_class:
+                    asset_file = os.path.join(assets_dir, "stable_hope_objects", f"{object_name}", "texture_map.png")
+                    assert os.path.isfile(asset_file), f"Asset file not found: {asset_file}"
+                    print(f"Found asset file: {asset_file}")
+                elif "google_scanned_objects" in object_class:
+                    asset_file = os.path.join(assets_dir, "stable_scanned_objects", f"{object_name}", "texture.png")
+                    assert os.path.isfile(asset_file), f"Asset file not found: {asset_file}"
+                    print(f"Found asset file: {asset_file}")
+                else:
+                    raise ValueError(f"Unknown object class: {object_class}")
+                with open(asset_file, 'rb') as f:
+                    image_bytes = f.read()
+                asset_contents.extend([f"Here is the object texture image of {object_name.replace('_', ' ')} in the task description, where you can idetify the color of the object", types.Part.from_bytes(data=image_bytes, mime_type='image/png')])
 
         # close env
         env.close()
@@ -120,7 +120,7 @@ class VLMAgent:
     ### CAUTION: do not identify the object completely based on the text description, look at the end image to see which object is being moved and how it is being operated.
     ### REMINDER: in real tasks below, the arrangements of the objects may be slightly different from the demonstration. So remember the actual shape and color of the target object, and do not solely rely on the relative position between objects in the demonstration. The target object may be partially occluded in the start image, so please analyze multiview images if needed.
         """
-        self.task_prompt = [prompt_base+prompt, "Here is the frontview and topview images of the start state of demonstration", start_image_agentview_part, start_image_topview_part, "Here is the frontview and topview images of the end state of demonstration", end_image_agentview_part, end_image_topview_part]
+        self.task_prompt = [prompt_base+prompt, "Here is the frontview and topview images of the start state of demonstration", start_image_agentview_part, start_image_topview_part, "Here is the frontview and topview images of the end state of demonstration", end_image_agentview_part, end_image_topview_part] + asset_contents
 
     def start_episode(self, obs):
         episode_start_image_topview = obs['birdview_image'][::-1]
