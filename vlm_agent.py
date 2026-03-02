@@ -19,13 +19,13 @@ You are a robotics expert, and you are here given a robot manipulation task.
 Please analyze the task and given images, understand the task, and provide correct action proposals or help identify the right actioin.
 """
 
-prompt_proposal = """- Part 3: Action Proposal
+prompt_proposal = """- Part 4: Action Proposal
     Now, here comes your job. The current robot state is shown in the frontview, topview and sideview images below. 
     The robot is currently stuck and needs your help to propose the next actions. Here are the guidelines for analyzing the current state and proposing the next action:
     ### Guideline for analysis:
     - step 1: identify the task instruction and target objects based on the demonstration images and instruction in Part 1, and identify the position of the target objects in our current episode based on the current episode images in Part 2, refrencing the demonstration images in Part 1.
-    - step 2: identify the state of the task, for example, which objects are already being moved and what should we do next. 
-    ### **Reminder**: compare the current state images below in Part 3 with the corresponding start state images in Part 2 to identify the task progress and object movements. Remember to analyze the topview images to see the objects clearly if there is occlusion.
+    - step 2: identify the state of the task, for example, which objects are already being moved and what should we do next. Use the observation history in Part 3 as a refrence to help understand the progress so far.
+    ### **REMINDER** The observation history may be before the current observation, so when planning the next stap, use the current observation images as your starting point. 
     - step 3: identify the position of the target object in the images to operate next.
     - step 4: identify the target position of the robot gripper, which should be above and near the target object. The girpper position should be ready to execute the next action.
     If the object is to be grasped/turned, the target position should be above, and if the object is opened/closed, the gripper should be behind the handle ready to execute. 
@@ -47,10 +47,14 @@ prompt_proposal = """- Part 3: Action Proposal
 class VLMAgent:
     def __init__(self, 
                  task_suite_name, 
-                 task_id):
+                 task_id,
+                 obs_history_interval=4
+                 ):
         self.task_suite_name = task_suite_name
         self.task_id = task_id
         self.get_task_description()
+
+        self.obs_history_interval = obs_history_interval
 
     def get_task_description(self):
         benchmark_dict = benchmark.get_benchmark_dict()
@@ -123,6 +127,7 @@ class VLMAgent:
         self.task_prompt = [prompt_base+prompt, "Here is the frontview and topview images of the start state of demonstration", start_image_agentview_part, start_image_topview_part, "Here is the frontview and topview images of the end state of demonstration", end_image_agentview_part, end_image_topview_part] + asset_contents
 
     def start_episode(self, obs):
+        self.obs_cache = []
         episode_start_image_topview = obs['birdview_image'][::-1]
         episode_start_image_agentview = obs['agentview_image'][::-1]
         episode_start_image_agentview_part = types.Part.from_bytes(data=numpy_to_jpeg_bytes(episode_start_image_agentview), mime_type='image/jpeg')
@@ -133,6 +138,16 @@ class VLMAgent:
         """
         self.current_episode_prompt = [prompt, "Here is the frontview and topview START state images of our episode", episode_start_image_agentview_part, episode_start_image_topview_part]
 
+    def cache_obs(self, obs):
+        self.obs_cache.append(types.Part.from_bytes(data=numpy_to_jpeg_bytes(obs['agentview_image'][::-1]), mime_type='image/jpeg'))
+    
+    def reflect_on_obs_history(self):
+        prompt = f"""- Part 3: Observations History Reflection
+        The robot has been executing actions to complete the task, and the key frames of frontview images of the robot's observations during the execution are shown below. Please analyze the observation history and reflect on the task progress, and identify which step of the task we are currently at, and what is the next step to achieve the task goal.
+        ### REMINDER: the observation images are only key frames, and there may have been missing frames between consecutive images.
+        """
+        self.obs_history_prompt = [prompt] + self.obs_cache[::self.obs_history_interval]
+
     def start_mpc(self, obs):
         current_image_frontview = obs['agentview_image'][::-1]
         current_image_topview = obs['birdview_image'][::-1]
@@ -142,8 +157,13 @@ class VLMAgent:
         current_image_sideview_part = types.Part.from_bytes(data=numpy_to_jpeg_bytes(current_image_sideview), mime_type='image/jpeg')
         self.mpc_obs = ["Here is the frontview image of the CURRENT state", current_image_frontview_part, "Here is the topview image of the CURRENT state", current_image_topview_part, "Here is the sideview image of the CURRENT state", current_image_sideview_part]
 
-    def get_action_proposal(self):
-        prompt = self.task_prompt + self.current_episode_prompt + [prompt_proposal] + self.mpc_obs
+    def get_action_proposal(self, reflect=True):
+        if reflect:
+            self.reflect_on_obs_history()
+            current_episode_prompt = self.current_episode_prompt + self.obs_history_prompt
+        else:
+            current_episode_prompt = self.current_episode_prompt
+        prompt = self.task_prompt + current_episode_prompt + [prompt_proposal] + self.mpc_obs
         response = call_api(prompt)
         print("API response:", response)
         output = get_json(response)
