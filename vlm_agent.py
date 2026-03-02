@@ -28,16 +28,20 @@ prompt_proposal = """- Part 4: Action Proposal
     ### **REMINDER** The observation history may be before the current observation, so when planning the next stap, use the current observation images as your starting point. 
     - step 3: identify the position of the target object in the images to operate next.
     - step 4: identify the target position of the robot gripper, which should be above and near the target object. The girpper position should be ready to execute the next action.
+    - step 5: To move the gripper from the current position to the target position, generate a mid-waypoint to avoid collision, so the gripper can follow the current position - mid-waypoint - target position trajectory to reach the target position safely without collision. 
     If the object is to be grasped/turned, the target position should be above, and if the object is opened/closed, the gripper should be behind the handle ready to execute. 
     ### Guideline for action proposal:
     - return the target position of the gripper in the format of (x, y) coordinates of the image, normalized to 0-1000. 
     - return the coordinates in json format for each image, for example:
     ```json
-    {
-    "frontview": {"x": 500, "y": 300},
-    "topview": {"x": 450, "y": 350},
-    "sideview": {"x": 480, "y": 320}
-    }
+    [
+      {
+        "frontview": {"x": 500, "y": 300},
+        "topview": {"x": 450, "y": 350},
+        "sideview": {"x": 480, "y": 320}
+        },
+        ...
+    ]
     ```
     - If the object is being occluded in any of the views, either give the coordinates based on the other views, or skip the view in the output. We at least need to views and their target position coordinates.
 
