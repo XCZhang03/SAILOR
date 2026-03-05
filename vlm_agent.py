@@ -26,26 +26,28 @@ prompt_proposal = """- Part 4: Action Proposal
     - step 1: identify the task instruction and target objects based on the demonstration images and instruction in Part 1, and identify the position of the target objects in our current episode based on the current episode images in Part 2, refrencing the demonstration images in Part 1.
     - step 2: identify the state of the task, for example, which objects are already being moved and what should we do next. Use the observation history in Part 3 as a refrence to help understand the progress so far.
     ### **REMINDER** The observation history may be before the current observation, so when planning the next stap, use the current observation images as your starting point. 
-    - step 3: identify the position of the target object in the images to operate next.
-    - step 4: identify the target position of the robot gripper, which should be above and near the target object. The girpper position should be ready to execute the next action.
+    - step 3: identify the position of the target object in the images to operate next, follow the order of objects in the task description if there are multiple subtasks.
+    - step 4: identify the target position of the robot gripper, where the robot should be ready to execute the actions to complete the next subtask.
     - step 5: To move the gripper from the current position to the target position, generate a mid-waypoint to avoid collision, so the gripper can follow the current position - mid-waypoint - target position trajectory to reach the target position safely without collision. 
-    If the object is to be grasped/turned, the target position should be above, and if the object is opened/closed, the gripper should be behind the handle ready to execute. 
     ### Guideline for action proposal:
     - return the target position of the gripper in the format of (x, y) coordinates of the image, normalized to 0-1000. 
-    - return the coordinates in json format for each image, for example:
+    - return the coordinates of mid-waypoint and target position in json format for each image, for example:
     ```json
     [
       {
         "frontview": {"x": 500, "y": 300},
         "topview": {"x": 450, "y": 350},
         "sideview": {"x": 480, "y": 320}
-        },
+        }, # mid-waypoint
+      {
+        "frontview": {"x": 600, "y": 400},
+        "topview": {"x": 550, "y": 450},
+        "sideview": {"x": 580, "y": 420}
+        } # target position
         ...
     ]
     ```
     - If the object is being occluded in any of the views, either give the coordinates based on the other views, or skip the view in the output. We at least need to views and their target position coordinates.
-
-    First reason from the multiview images and analyze, and then return the json output.
     """
 
 class VLMAgent:
@@ -108,7 +110,8 @@ class VLMAgent:
                     assert os.path.isfile(asset_file), f"Asset file not found: {asset_file}"
                     print(f"Found asset file: {asset_file}")
                 else:
-                    raise ValueError(f"Unknown object class: {object_class}")
+                    asset_contents = []
+                    break
                 with open(asset_file, 'rb') as f:
                     image_bytes = f.read()
                 asset_contents.extend([f"Here is the object texture image of {object_name.replace('_', ' ')} in the task description, where you can idetify the color of the object", types.Part.from_bytes(data=image_bytes, mime_type='image/png')])
@@ -145,6 +148,44 @@ class VLMAgent:
     def cache_obs(self, obs):
         self.obs_cache.append(types.Part.from_bytes(data=numpy_to_jpeg_bytes(obs['agentview_image'][::-1]), mime_type='image/jpeg'))
     
+    def verify_task_progress(self, interval=1, num_hist=1):
+        prompt = """- Part 3: Task Progress Verification
+        The robot has been executing actions to complete the task.
+        The frontview image of the past step(s) and the frontview image of the current step is shown below. 
+        Please analyze the images, and verify whether the robot has made progress in the current step compared with previous step(s).
+        If there is progress, please return 1. If there is no progress or wrong progress, where the gripper is stucked in the same place, or the gripper is not moving towards the target object, return 0
+        ### **REMINDER** The gripper movements may be slower when grasping/droping an object, so as long the robot is gasping or releasing the correct target object return 1.
+        Also, sometimes when placing objects into a tight space, the object orientation must be aligned with the openings. Return 0 if the object orientation is wrong.
+        ### **CAUTION** The gripper may reach for the **WRONG** object instead of the target object in task instruction as in Part 1 and Part 2. Please verify carefully if the gripper is moving towards the right target object. If not, return 0.
+        return in json format, for example:
+        ```json
+        {
+        "progress": 1
+        }
+        ```
+        """
+        content = self.task_prompt + self.current_episode_prompt + [prompt, "Here is the frontview image of the past steps",] + self.obs_cache[slice(-num_hist * interval - 1, -1, interval)] + ["Here is the frontview image of the current step", self.obs_cache[-1]] + \
+            ["Reason about the task progress based on the images first following the previous instructions and analyze the gripper movements and object status (if object is grasped), and then return the result in json format."]
+        response = call_api(content)
+        print("API response for task progress verification:", response)
+        return get_json(response)["progress"]
+
+    def verify_subtask_completion(self, next_subtask_instruction):
+        prompt = f"""- Part 4: Subtask Completion Verification
+        The robot has been executing actions so far. Here is the next subtask instruction: {next_subtask_instruction}. 
+        Please analyze whether the robot has completed the **previous** subtasks and is ready to **start** the next subtask, based on the observation history in Part 3. 
+        Return 1 if the subtask is completed, 0 otherwise.""" + """
+        Example:
+        ```json
+        {"start_subtask": 1}
+        ```
+        ## **REMINDER** The question is whether the robot has completed all previous subtasks and ready ro proceed to the mentioned subtask.
+        """
+        content = self.task_prompt + self.current_episode_prompt + self.obs_history_prompt + [prompt]
+        response = call_api(content)
+        # print("API response for subtask completion verification:", response)
+        return get_json(response)["start_subtask"]
+
     def reflect_on_obs_history(self):
         prompt = f"""- Part 3: Observations History Reflection
         The robot has been executing actions to complete the task, and the key frames of frontview images of the robot's observations during the execution are shown below. Please analyze the observation history and reflect on the task progress, and identify which step of the task we are currently at, and what is the next step to achieve the task goal.
@@ -161,14 +202,11 @@ class VLMAgent:
         current_image_sideview_part = types.Part.from_bytes(data=numpy_to_jpeg_bytes(current_image_sideview), mime_type='image/jpeg')
         self.mpc_obs = ["Here is the frontview image of the CURRENT state", current_image_frontview_part, "Here is the topview image of the CURRENT state", current_image_topview_part, "Here is the sideview image of the CURRENT state", current_image_sideview_part]
 
-    def get_action_proposal(self, reflect=True):
-        if reflect:
-            self.reflect_on_obs_history()
-            current_episode_prompt = self.current_episode_prompt + self.obs_history_prompt
-        else:
-            current_episode_prompt = self.current_episode_prompt
-        prompt = self.task_prompt + current_episode_prompt + [prompt_proposal] + self.mpc_obs
-        response = call_api(prompt)
+    def get_action_proposal(self):
+        self.reflect_on_obs_history()
+        content = self.task_prompt + self.current_episode_prompt + self.obs_history_prompt + [prompt_proposal] + self.mpc_obs + \
+            ["First reason from the multiview images and analyze following the guidelines, and then return the json output."]
+        response = call_api(content)
         print("API response:", response)
         output = get_json(response)
         return output
