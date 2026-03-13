@@ -42,18 +42,19 @@ from diffusion_policy.common.pytorch_util import dict_apply
 import numpy as np
 
 from diffusion_policy.common.libero_utils import LANG_EMBED_CACHE_FILE
-def embed_lang(instruction: str) -> np.ndarray:
+def embed_lang(instruction: str, compute_embed=False) -> np.ndarray:
     lang_embed_cache = dict(np.load(LANG_EMBED_CACHE_FILE)) if os.path.exists(LANG_EMBED_CACHE_FILE) else dict()
     lang_embed = lang_embed_cache.get(instruction, None)
-    # if lang_embed is not None:
-    #     print('Loaded language embed from cache.')
+    if lang_embed is not None:
+        print('Loaded language embed from cache.')
     if lang_embed is None:
-        raise NotImplementedError
-        # from diffusion_policy.model.vision.model_getter import get_language_model
-        # lang_encode_fn = get_language_model()
-        # lang_embed = lang_encode_fn(instruction).astype(np.float32)
-        # lang_embed_cache[instruction] = lang_embed
-        # np.savez_compressed(LANG_EMBED_CACHE_FILE, **lang_embed_cache)
+        if not compute_embed:
+            raise ValueError(f"Language instruction not found in cache. Set compute_embed=True to compute and cache the language embedding.")
+        from diffusion_policy.model.vision.model_getter import get_language_model
+        lang_encode_fn = get_language_model()
+        lang_embed = lang_encode_fn(instruction).astype(np.float32)
+        lang_embed_cache[instruction] = lang_embed
+        np.savez_compressed(LANG_EMBED_CACHE_FILE, **lang_embed_cache)
     return lang_embed
 
 

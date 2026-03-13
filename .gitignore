@@ -27,3 +27,5 @@ datasets
 env_repos/
 
 *.mp4
+
+rollout*
