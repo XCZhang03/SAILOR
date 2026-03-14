@@ -119,8 +119,10 @@ def is_noop(action, obs, threshold=9e-2):
     return np.linalg.norm(action[:-1]) < threshold and not moving
 
 
-def optimize_trajectory(traj_response):
-    adjustment = np.array([traj_response['delta_x'] * 0.01, traj_response['delta_y'] * 0.01, traj_response['delta_z'] * 0.06])
+def optimize_trajectory(traj_response, scale=0.06):
+    if traj_response['delta_z'] < 0:
+        traj_response['delta_z'] = 0
+    adjustment = np.array([traj_response['delta_x'] * 0.01, traj_response['delta_y'] * 0.01, traj_response['delta_z'] * scale])
     return adjustment
 
 def optimize_endpoint(endpoint_response, scale=0.02):
@@ -160,7 +162,7 @@ def generate_candidates(target_point, gaussian=False):
 
 view_config = {
     "sideview": [4, 6],
-    "wristview": [],
+    "wristview": [7,],
 }
 subtask_steps = {
     0: 100,

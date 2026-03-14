@@ -20,4 +20,4 @@ python server.py &
 sleep 120
 cd ..
 mamba activate libero_env
-python dp_search.py
+python dp_optimize.py

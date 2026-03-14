@@ -244,10 +244,10 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
 
             # -- Step 2: Optimise approach midpoint --
             traj_response = agent.optimize_trajectory(wm_agent_obs)
-            midpoint_adjustment = optimize_trajectory(traj_response)
+            midpoint_adjustment = optimize_trajectory(traj_response,  scale=0.1)
             midpoint_obs = wm_agent_obs[20]
             midpoint_obs['robot0_eef_pos'] += midpoint_adjustment
-            action_chunk = idm_fn_2(obs, midpoint_obs['robot0_eef_pos'], midpoint_obs['robot0_eef_quat'])
+            action_chunk = update_gripper_action(idm_fn_2(obs, midpoint_obs['robot0_eef_pos'], midpoint_obs['robot0_eef_quat']), gripper_action)
             for action in action_chunk:
                 obs, reward, done, info = wm_env.step(action)
                 replay_images.append(obs["agentview_image"][::-1])
@@ -261,7 +261,7 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
             with wm_env.simulation():
                 pred_obs = wm_env.simulate(action_chunk)
                 wm_agent_obs = pred_obs['future_obs']
-            imageio.mimwrite(os.path.join(save_dir, f"rotation_candidate{i}.mp4"), pred_obs['WMPredictionOutput'].full_video, fps=20)
+            imageio.mimwrite(os.path.join(save_dir, f"wm_output_2.mp4"), pred_obs['WMPredictionOutput'].full_video, fps=20)
             endpoint_response = agent.optimize_endpoint(wm_agent_obs)
             target_point += optimize_endpoint(endpoint_response, scale=0.03)
             action_chunk = idm_fn_2(obs, target_point, target_quat=target_quat)
@@ -309,7 +309,7 @@ if __name__ == "__main__":
 
     for task in [7]:
         num_success = 0
-        for seed in range(10):
+        for seed in range(9, 10):
             success = run_mpc(task_id=task, seed=seed, wm_client=wm_client)
             if success:
                 num_success += 1
