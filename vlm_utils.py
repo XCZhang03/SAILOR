@@ -3,6 +3,8 @@ import json
 import re
 from PIL import Image
 import numpy as np
+from typing import List
+from google.genai import types 
 
 from env_repos.robosuite.robosuite.models.tasks import task
 
@@ -30,9 +32,21 @@ def get_json(response_text):
         except json.JSONDecodeError:
             print("Failed to decode JSON.")
             return None
-    else:
-        print("No JSON found in the response.")
-        return None
+
+    # Fallback: try to extract a raw JSON object or array
+    raw_pattern = r'(\{.*\}|\[.*\])'
+    match = re.search(raw_pattern, response_text, re.DOTALL)
+    if match:
+        json_str = match.group(1)
+        try:
+            output = json.loads(json_str)
+            return output
+        except json.JSONDecodeError:
+            print("Failed to decode JSON.")
+            return None
+
+    print("No JSON found in the response.")
+    return None
 
 
 # ------------------------------------------------------------
@@ -87,6 +101,8 @@ def generate_3d_point(coordinates, camera_info):
     uv_list = []
     p_list = []
     for view in coordinates:
+        if view not in view_name_mapping:
+            continue
         _view = view_name_mapping[view]
         x = int(coordinates[view]["x"] / 1000 * camera_info[_view]["camera_width"])
         y = int(coordinates[view]["y"] / 1000 * camera_info[_view]["camera_height"])
@@ -143,26 +159,44 @@ def generate_rotation_candidates():
 def update_gripper_action(action_chunk, gripper_action):
     if gripper_action == -1:
         action_chunk[:, -1] = -1
+    elif gripper_action == 1:
+        action_chunk[:, -1] = 1
+    else:
+        raise ValueError("Invalid gripper action. Expected -1 or 1.")
     return action_chunk
     
 
-def generate_candidates(target_point, gaussian=False):
+def generate_candidates(target_point, gaussian=False, scale=0.05):
     candidates = [target_point]
     if not gaussian:
-        noise = [[0.05,0,0], [-0.05,0,0], [0,0.05,0], [0,-0.05,0]]
+        noise = [[scale,0,0], [-scale,0,0], [0,scale,0], [0,-scale,0]]
         for n in noise:
             noised_point = target_point + np.array(n)
             candidates.append(noised_point)
     else:
         for _ in range(3):
-            noised_point = target_point + np.random.normal(0, 0.05, size=3)
+            noised_point = target_point + np.random.normal(0, scale, size=3)
             candidates.append(noised_point)
     return candidates
 
+def combine_rankings(ranking_1, ranking_2):
+    combined_scores = {}
+    
+    # Assign score based on position in the ranking (lower score = better ranking)
+    for i, candidate in enumerate(ranking_1):
+        combined_scores[candidate] = combined_scores.get(candidate, 0) + i
+    for i, candidate in enumerate(ranking_2):
+        combined_scores[candidate] = combined_scores.get(candidate, 0) + i
+    
+    # Sort candidates by their combined scores (lowest score is the best)
+    best_candidate = min(combined_scores, key=combined_scores.get)
+    return best_candidate
+
 
 view_config = {
-    "sideview": [4, 6],
-    "wristview": [7,],
+    "topview": [1],
+    "sideview": [0,2,7],
+    "wristview": [1,3,4,5,6,8,9],
 }
 subtask_steps = {
     0: 100,
@@ -189,6 +223,13 @@ subtask_scales = {
     6: 0.5,
     7: 1.0
 
+}
+
+target_object = {
+    0: "a blue round can",
+    1: "a blue box",
+    4: "a red ketchup bottle with silver cap",
+    8: "a brown rectangle box"
 }
 
 

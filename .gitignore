@@ -29,3 +29,10 @@ env_repos/
 *.mp4
 
 rollout*
+*.png
+
+openvla*
+Dita
+
+env_repos
+third_party

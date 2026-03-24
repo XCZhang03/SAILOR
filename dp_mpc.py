@@ -52,16 +52,15 @@ def _get_empty_env(task, env):
 
 
 def run_mpc(task_id=0, seed=0):
-    save_dir = os.path.join("scratch_dir/mpc_data/test_agent_proposal", f"task{task_id}", f"seed{seed}")
+    save_dir = os.path.join("scratch_dir/mpc_data/libero_object/test_agent_proposal", f"task{task_id}", f"seed{seed}")
     os.makedirs(save_dir, exist_ok=True)
     if os.path.exists(save_dir):
         shutil.rmtree(save_dir)
     os.makedirs(save_dir, exist_ok=True)
     
-    task_suite_name = "libero_10"
+    task_suite_name = "libero_object"
     task_id = task_id
     seed = seed
-    agent = VLMAgent(task_suite_name, task_id)
 
     benchmark_dict = benchmark.get_benchmark_dict()
     task_suite = benchmark_dict[task_suite_name]()
@@ -74,42 +73,34 @@ def run_mpc(task_id=0, seed=0):
     # ========== ENVIRONMENT INITIALIZATION ==========
     env.reset()
     num_steps = 0
-    subtask_id = 0
     done = False
     replay_images = []
     obs = env.set_init_state(initial_states[seed])
     for t in range(10):
         obs, reward, done, info = env.step(LIBERO_DUMMY_ACTION)
-    agent.start_episode(obs)
 
     # ========== LOAD POLICIES ==========
     from dp_utils import embed_lang
-    subtasks = libero10_subtask_map[task_id]
-    avail_task_suite = benchmark_dict["libero_90"]()
-    subtask_embeddings = []
-    subtask_descriptions = []
-    for subtask_id in subtasks:
-        subtask = avail_task_suite.get_task(subtask_id)
-        subtask_description = subtask.language
-        print(f"Subtask description: {subtask_description}")
-        subtask_embedding = embed_lang(subtask_description)
-        subtask_embeddings.append(subtask_embedding)
-        subtask_descriptions.append(subtask_description)
-    
+    subtask_description = task_description.replace(" up", "")
+    print(f"Subtask description: {subtask_description}")
+    subtask_embedding = embed_lang(subtask_description)
+        
     from dp_utils import load_checkpoint
-    checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.02.27/09.11.46_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0014-test_mean_score=1.000.ckpt"
-    # checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.02.27/20.14.00_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0012-test_mean_score=1.000.ckpt"
+    import robosuite.utils.transform_utils as T
+    # checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.02.27/09.11.46_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0014-test_mean_score=1.000.ckpt"
+    checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.19/11.59.01_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=2050-test_mean_score=1.000.ckpt"
     # checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.05/06.14.04_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0022-test_mean_score=1.000.ckpt"
+    # checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.08/09.41.02_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0300-test_mean_score=1.000.ckpt"
     policy, cfg = load_checkpoint(checkpoint_path)
     policy = policy.to("cuda")
     import torch
     def to_torch(image):
         image = image_tools.resize_with_pad(image, 128, 128)
         return np.moveaxis(image[::-1], -1, 0) / 255.0
-    def policy_fn(obs, subtask_id=0):
+    def policy_fn(obs):
         np_obs_dict = dict(obs)
         if "lang_embed" in cfg.shape_meta.obs:
-            np_obs_dict["lang_embed"] = subtask_embeddings[subtask_id]
+            np_obs_dict["lang_embed"] = subtask_embedding
         obs_keys = cfg.shape_meta.obs.keys()
         np_obs_dict = {k: np_obs_dict[k] for k in obs_keys}
         np_obs_dict = {k: to_torch(v) if "image" in k else v for k, v in np_obs_dict.items()}
@@ -120,18 +111,40 @@ def run_mpc(task_id=0, seed=0):
         action = np_action_dict['action_pred'][0]
         return action
 
-    idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.01/20.20.00_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0200-val_loss=0.058.ckpt"
+    # idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.02/07.30.54_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0100-val_loss=0.034.ckpt"
+    idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/08.56.15_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0110-val_loss=0.019.ckpt"
+    # idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.12/01.36.19_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0020-val_loss=0.025.ckpt"
     idm, idm_cfg = load_checkpoint(idm_checkpoint_path)
     idm = idm.to("cuda")
-    def idm_fn(obs, delta_pos):
+    def idm_fn(obs, target_pos, target_quat=None):
         np_obs_dict = dict(obs)
         obs_keys = idm_cfg.shape_meta.obs.keys()
         np_obs_dict = {k: np_obs_dict[k] for k in obs_keys}
-        delta_obs_dict = {"robot0_eef_pos": delta_pos}
+        delta_obs_dict = {"robot0_eef_pos": target_pos - obs['robot0_eef_pos']}
+        if target_quat is not None:
+            delta_obs_dict['robot0_eef_quat'] = T.quat_distance(target_quat, obs['robot0_eef_quat'])
         obs_dict = {k: torch.from_numpy(v).to("cuda").unsqueeze(0) for k, v in np_obs_dict.items()}
         delta_obs_dict = {k: torch.from_numpy(v).to("cuda").unsqueeze(0) for k, v in delta_obs_dict.items()}
         with torch.no_grad():
             action_dict = idm.predict_action(obs_dict, delta_obs_dict)
+        np_pred_action = action_dict['action_pred'].cpu().numpy()[0]
+        return np_pred_action
+
+    # idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.02/07.30.54_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0100-val_loss=0.034.ckpt"
+    idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.11/21.52.52_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0040-val_loss=0.026.ckpt"
+    idm_2, idm_2_cfg = load_checkpoint(idm_2_checkpoint_path)
+    idm_2 = idm_2.to("cuda")
+    def idm_fn_2(obs, target_pos, target_quat=None):
+        np_obs_dict = dict(obs)
+        obs_keys = idm_2_cfg.shape_meta.obs.keys()
+        np_obs_dict = {k: np_obs_dict[k] for k in obs_keys}
+        delta_obs_dict = {"robot0_eef_pos": target_pos - obs['robot0_eef_pos']}
+        if target_quat is not None:
+            delta_obs_dict['robot0_eef_quat'] = T.quat_distance(target_quat, obs['robot0_eef_quat'])
+        obs_dict = {k: torch.from_numpy(v).to("cuda").unsqueeze(0) for k, v in np_obs_dict.items()}
+        delta_obs_dict = {k: torch.from_numpy(v).to("cuda").unsqueeze(0) for k, v in delta_obs_dict.items()}
+        with torch.no_grad():
+            action_dict = idm_2.predict_action(obs_dict, delta_obs_dict)
         np_pred_action = action_dict['action_pred'].cpu().numpy()[0]
         return np_pred_action
     
@@ -145,64 +158,13 @@ def run_mpc(task_id=0, seed=0):
             import tqdm
             print("Phase 1: Executing policy")
             pbar = tqdm.tqdm(total=500, desc="Executing policy ")
-            subtask_id = 0
             while not done and num_steps < 400:
-                action_chunk = policy_fn(obs, subtask_id=subtask_id)[:10]
+                action_chunk = policy_fn(obs)[:10]
                 for action in action_chunk:
                     obs, reward, done, info = env.step(action)
                     replay_images.append(obs["agentview_image"][::-1])
                 pbar.update(10)
                 num_steps += 10
-                if num_steps >= subtask_steps[task_id] and agent.verify_subtask_completion(subtask_descriptions, obs):
-                    subtask_id = 1
-                    break
-                else:
-                    agent.cache_obs(obs)
-            
-            # Phase 2: Execute agent MPC
-            print("Phase 2: Executing agent MPC...")
-            agent.start_mpc(obs)
-            agent_actions = agent.get_action_proposal()
-            if agent_actions is None:
-                agent_actions = agent.get_action_proposal()
-            if all([action_dict["action"] == "RELEASE" for action_dict in agent_actions]):
-                agent_actions = agent.get_action_proposal()
-            
-            gripper_action = None
-            for action_dict in agent_actions:
-                if action_dict["action"] == "RELEASE":
-                    for _ in range(10):
-                        obs, reward, done, info = env.step(LIBERO_DUMMY_ACTION)
-                        replay_images.append(obs["agentview_image"][::-1])
-                    pbar.update(10)
-                    num_steps += 10
-                    gripper_action = -1
-                if action_dict["action"] == "MOVE":
-                    target_point = generate_3d_point(action_dict['parameters'], empty_env.get_camera_info())
-                    plot_coordinates_on_image(obs, action_dict['parameters'], os.path.join(save_dir, f"mpc_at{num_steps}.png"))
-                    action_chunk = idm_fn(obs, target_point - obs["robot0_eef_pos"])
-                    if gripper_action == -1:
-                        action_chunk[:, -1] = -1
-                    for action in action_chunk:
-                        obs, reward, done, info = env.step(action)
-                        replay_images.append(obs["agentview_image"][::-1])
-                    pbar.update(len(action_chunk))
-                    num_steps += len(action_chunk)
-                    agent.cache_obs(obs)
-                    gripper_action = None
-                    break
-
-
-            print("Resuming policy execution after MPC...")
-            subtask_id = 1  # Assuming the MPC is for subtask 0, we now switch to subtask 1
-            while not done and num_steps < 500:
-                action_chunk = policy_fn(obs, subtask_id=subtask_id)[:10]
-                for action in action_chunk:
-                    obs, reward, done, info = env.step(action)
-                    replay_images.append(obs["agentview_image"][::-1])
-                pbar.update(10)
-                num_steps += 10
-                agent.cache_obs(obs)
         
             pbar.close()
             print(f"Execution completed. Total steps: {num_steps}, Done: {done}")
@@ -218,12 +180,12 @@ def run_mpc(task_id=0, seed=0):
 
 
 if __name__ == "__main__":
-    for task in [0]:
+    for task in range(2,10):
         num_success = 0
         for seed in range(10):
             success = run_mpc(task_id=task, seed=seed)
             if success:
                 num_success += 1
             print(f"Number of successful runs: {num_success}/{seed+1}")
-        with open(os.path.join("scratch_dir/mpc_data/test_agent_proposal", f"task{task}", "result.txt"), "w") as f:
+        with open(os.path.join("scratch_dir/mpc_data/libero_object/test_agent_proposal", f"task{task}", "result.txt"), "w") as f:
             f.write(f"Success rate: {num_success}/10\n")
