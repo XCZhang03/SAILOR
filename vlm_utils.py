@@ -138,7 +138,7 @@ def is_noop(action, obs, threshold=9e-2):
 def optimize_trajectory(traj_response, scale=0.06):
     if traj_response['delta_z'] < 0:
         traj_response['delta_z'] = 0
-    adjustment = np.array([traj_response['delta_x'] * 0.01, traj_response['delta_y'] * 0.01, traj_response['delta_z'] * scale])
+    adjustment = np.array([traj_response['delta_x'] * 0.02, traj_response['delta_y'] * 0.02, traj_response['delta_z'] * scale])
     return adjustment
 
 def optimize_endpoint(endpoint_response, scale=0.02):
@@ -228,7 +228,9 @@ subtask_scales = {
 target_object = {
     0: "a blue round can",
     1: "a blue box",
+    2: "a black bottle",
     4: "a red ketchup bottle with silver cap",
+    7: "a red paper milk carton box",
     8: "a brown rectangle box"
 }
 

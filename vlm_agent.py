@@ -21,17 +21,19 @@ Please analyze the task and given images, understand the task, and provide corre
 """
 
 prompt_proposal = """- Part 3: Action Proposal
-    Now, please propose the next actions for the robot to complete the task. You should complete the task following the order in the instruction. 
+    Now, please propose the next actions for the robot to complete the task.
+    You have already grasped the object, and now you need to move the object and place it into the basket.
+    Output you action sequence composed of the atomic actions below, and follow the format strictly as in the example.
     The available atomic actions are:
     1. **MOVE** Here you move the gripper to a target position, and you should point it out in the multiview state images provided below. 
     The position should be represented by x,y pixel coordinates normalized to 0-999. 
-    **REMINDER** To grasp or operate an object, move towards it.
     Examples:
     {
     "action": "MOVE",
     "parameters": {
     "frontview": {"x": 500, "y": 300},
     "topview": {"x": 450, "y": 350},
+    "sideview": {"x": 400, "y": 250}
     }
     2. **ROTATION** Here you rotate the gripper, and you return the rotation in Euler angles [delta_roll, delta_pitch, delta_yaw] in degrees. 
     ### **REMINDER** 
@@ -72,6 +74,7 @@ prompt_proposal = """- Part 3: Action Proposal
     "parameters": {
     "frontview": {"x": 500, "y": 300},
     "topview": {"x": 450, "y": 350},
+    "sideview": {"x": 400, "y": 250}
     }
     },
     {
@@ -88,8 +91,6 @@ prompt_proposal = """- Part 3: Action Proposal
     }
     ]
     ```
-    **REMINDER** Reason carefully about object positions in the multiview images, and make sure you are pointing to the target object where we should move our robot.
-    Refer to the task instructions in Part 1 to identify the target object, and make sure you are pointing to the same object in the multiview images.
     """
 
 prompt_object = """- Part 2: Identify target object.
@@ -225,10 +226,20 @@ class VLMAgent:
 
         return object_pixels
 
+    def start_mpc(self, obs):
+        frontview_image = obs['agentview_image'][::-1]
+        topview_image = obs['birdview_image'][::-1]
+        sideview_image = obs['sideview_image'][::-1]
+
+        frontview_image_byte = numpy_to_jpeg_bytes(frontview_image)
+        topview_image_byte = numpy_to_jpeg_bytes(topview_image)
+        sideview_image_byte = numpy_to_jpeg_bytes(sideview_image)
+
+        self.mpc_obs = ["Here is the frontview image of the current state"] + [frontview_image_byte] + ["Here is the topview image of the current state"] + [topview_image_byte] + ["Here is the sideview image of the current state"] + [sideview_image_byte]
 
     def get_action_proposal(self):
-        content = self.task_prompt + [prompt_object] + self.episode_obs + \
-            ["Please analyze images, think step by step following the guidelines to identify the target object, and return the proposed actions in json format as in the example."]
+        content = self.task_prompt + [prompt_proposal] + self.mpc_obs + \
+            ["Please analyze images, and return the proposed actions in json format as in the example."]
         response = call_api(content, thinking="low")
         print("API response:", response)
         output = get_json(response)
@@ -236,20 +247,19 @@ class VLMAgent:
 
     def place_proposal(self):
         prompt = """- Part 1: Target position for placement
-        Here, I want you to identify the target position of the basket for the gripper to prepare for placement. 
-        You should point out the target position **directly above the basket** in the multiview images provided below. The position should be represented by x,y pixel coordinates normalized to 0-999.
-        Guideline:
-        1. The point should be **directly above** the basket center, so in the frontview and sideview images, the point should be above the basket and at the middle of the basket.
-        2. In the topview image, the point should be at the center of the basket.
+        Here, I want you to identify the target position for the gripper to prepare for placement. 
+        You should point out the target position of the robot gripper in the multiview images provided below, so that the target object can be placed into the basket from there. 
+        The position should be represented by x,y pixel coordinates normalized to 0-999.
         Format: Please return the target position in json format, for example:
 ```json
 {
 "frontview": {"x": 500, "y": 300},
-"topview": {"x": 450, "y": 350}
+"topview": {"x": 450, "y": 350},
+"sideview": {"x": 400, "y": 250}
 }
 ```
         """
-        content = [prompt] + self.episode_obs + \
+        content = [prompt] + self.mpc_obs + \
             ["Please analyze the images, think step by step following the guidelines to identify the target position for placement, and return the result in json format."]
         response = call_api(content, thinking="low")
         print("API response for placement proposal:", response)
@@ -259,14 +269,13 @@ class VLMAgent:
     def optimize_trajectory(self, obs_list):
         prompt = """- Part 4: Optimize trajectory
         Here we provide a robot trajectory trying to comlete the task, and I need you to optimize the trajectory to make it safer and more successful in completing the task.
-        I want you to return the direction to move the gripper so that it can be collision-free and ready to complete the task.
-        Return the gripper trajectory adjustments in x y z directions, and which part of the trajectory needs to be adjusted:
+        I want you to return the direction to move the gripper so that it can be collision-free with objects and ready to complete the task.
+        Return the gripper trajectory adjustments in x y z directions:
         The coordinate system and axis are defined as follows: from the frontview camera perspective,
         - The x axis is pointing towards the camera, with away from camera (towards the robot body) being negative x and towards the camera being positive x.
         - The y axis is pointing to the right, with left being negative y and right being positive y.
         - The z axis is pointing upwards, with down being negative z and upwards being positive z.
         For example, if you need to lift the gripper up to avoid collision, return 1 in z direction and 0 in x and y direction.
-        You should output your gripper adjustments at the **middle** of the trajectory, so the gripper is collision-free when following the adjusted trajectory.
         Please return your adjustments direction in json format, for example:
         ```json
         {
@@ -277,52 +286,30 @@ class VLMAgent:
         ```
          where delta_x, delta_y, delta_z can only be -1, 0 or 1, with 0 being no movement in that direction, 1 being move towards positive direction and -1 being move towards negative direction.
         Here are the guidelines for optimization:
-        0. Refelect on the task instruction and previous history, and understand what the trajectory is trying to do, and which part of the task it is trying to complete. This will help you analyze the trajectory and find out potential problems and how to optimize.
+        0. Refelect on the task instruction and understand what the trajectory is trying to do.
         1. Analyze the trajectory frame by frame, and inspect whether there may be potential collisions with any object along the trajectory. 
-            - Make sure that the gripper had cleared any previous objects such as cups and backet rims during the movement, especially at the start of the trajectory.
+            - Make sure that the gripper had cleared any previous objects such as backet rims during the movement, especially at the start of the trajectory.
             - If there is any potential collision with rims and objects, adjust the gripper direction, so that the trajectory is fully clear of any obstacles.
-        2. Remember you should output the deltas or adjustments of the trajectory. If the trajectory is moving towards the right direction you do not need to further enhance the movement in that direction, you only need to adjust the trajectory when there is potential problem or when the trajectory is not moving towards the right direction.
+        2. The images are from simulation thus not perfectly realistic, if you find the trajectory is very close to the rim in the images, you should also adjust the gripper to be safer.
         """
         frontview_image_byte_list = []
         for obs in obs_list:
             frontview_image = obs['agentview_image'][::-1]
             frontview_image_byte = numpy_to_jpeg_bytes(frontview_image)
             frontview_image_byte_list.append(frontview_image_byte)
-        content = self.task_prompt + self.current_episode_prompt + self.obs_history_prompt + [prompt] + ["Here is the frontview images of the trajectory to be optimized"] + frontview_image_byte_list[::2] + \
+        content = self.task_prompt + [prompt] + ["Here is the frontview images of the trajectory to be optimized"] + frontview_image_byte_list[::2] + \
             ["Please analyze the trajectory based on the guidelines and images step by step, and then return the optimization result in json format."]
-        response = call_api(content, thinking=None)
+        response = call_api(content, thinking="low")
         print("API response for trajectory optimization:", response)
         return get_json(response)
 
-    def optimize_gripper(self):
-        prompt = """- Part 4: Optimize gripper action
-        Here I want you to decide whether we should open our gripper or close our gripper when we are executing the future actions. Analyze following the guidelines below:
-        1. Reflect on the task instruction and previous history, and understand what the gripper is trying to do in the future trajectory, and which part of the task it is trying to complete. This will help you analyze whether we should open or close our gripper.
-        2. If we have just placed a previous object, and in the future we are reaching for another object, we should open our gripper to release the previous object and then grasp the next object. 
-        3. If we have just grasped an object, and in the future we are reaching for a target region to place the object, we should close our gripper to firmly hold the object and place it stably.
-        4. Look carefully at the current state image, and determine whether the object in the gripper have been placed at the right place. If it has already been placed, you should open gripper.
-        Format:
-        Please return your gripper action in json format, for example:
-        ```json
-        {
-        "gripper_action": "-1"
-        }
-        ```
-        where gripper_action can only be -1, or 1, with -1 means opening and 1 means closing.
-        """
-        content = self.task_prompt + self.current_episode_prompt + self.obs_history_prompt + [prompt] +\
-        ["Here is the frontview images of the state"] + self.mpc_obs_frontview + \
-        ["Please analyze the trajectory based on the guidelines and images, reason carefully step by step, and then return the result in json format."]
-        response = call_api(content, thinking=None)
-        print("API response for gripper optimization:", response)
-        return get_json(response)['gripper_action']
     
     def optimize_height(self, obs_list):
         prompt = """- Part 3: Optimize gripper height
-        Here I will give you a series of images showing the trajectory of the gripper approaching and trying to grasp an object.
-        I want you to identify whether the gripper height need to be adjusted by lifting to avoid collision with the object and ensure a safe grasp.
+        Here I will give you a series of images showing the trajectory of the gripper approaching and trying to place an object.
+        I want you to identify whether the gripper height need to be adjusted by lifting to avoid collision with objects.
         Please analyze following the guidelines below:
-        1. First, reflect on the task instruction and previous history, and understand what the gripper is trying to do and what is the target object. This will help you analyze whether we should adjust the gripper height.
+        1. First, reflect on the task instruction and understand what the gripper is trying to do.
         2. The gripper should be slightly above the object top to ensure enough room for descending and grasping, which is approximately half the object height.
         3. If the gripper jaws are almost touching the object in the final images and there is potential risk of collision, you should lift the gripper by returning 1
         4. If the gripper is at a safe height, you should return 0.
@@ -341,7 +328,7 @@ class VLMAgent:
             frontview_image = obs['agentview_image'][::-1]
             frontview_image_byte = numpy_to_jpeg_bytes(frontview_image)
             frontview_image_byte_list.append(frontview_image_byte)
-        content = self.task_prompt + self.current_episode_prompt + [prompt] + frontview_image_byte_list[-4:] + \
+        content = self.task_prompt + [prompt] + frontview_image_byte_list[-4:] + \
         ["Please analyze the trajectory based on the guidelines and images, reason carefully step by step, and then return the result in json format."]
         response = call_api(content, thinking=None)
         print("API response for gripper height optimization:", response)
@@ -352,7 +339,7 @@ class VLMAgent:
         Here I will give you a image of the gripper approaching and trying to grasp an object from the frontview and sideview.
         I want you to identify whether the gripper height need to be adjusted by lifting to avoid collision with the object and ensure a safe grasp.
         Please analyze following the guidelines below:
-        1. First, reflect on the task instruction and taeget object, and understand what the gripper is trying to grasp.
+        1. First, reflect on the task instruction and target object, and understand what the gripper is trying to grasp.
         2. The gripper should be above the object top to ensure enough room for descending and grasping, which is approximately half the object height.
         3. If the gripper jaws are almost touching the top of the object in the frontview images and there is potential risk of collision, you should lift the gripper by returning 1
         4. From the sideview image, zoom in on the gripper and the object, make sure the gripper jaws are above the top of the object.
@@ -556,11 +543,11 @@ The range of the ranking is from 0 to N-1, where N is the total number of candid
     def rank_placement_sideview(self, candidate_obs_list):
         prompt = """
 - Part 4: Rank placement candidates
-Here I give you a set of candidate images that shows the sideview of the robot state,   above the basket and trying to drop an object into the basket.
+Here I give you a set of candidate images that shows the sideview of the robot state, above the basket and trying to drop an object into the basket.
  I want you to analyze the images and rank the position of the gripper:
 - The gripper should be directly above the center of the basket, so in the sideview image, the gripper should be above the basket and at the middle of the basket.
-- If the gripper is to the left or to the right of the basket, and when opening the gripper, the grasped object may be droped out of the basket, the position is bad. The gripper should be well aligned with the basket center, so that the object can be safely dropped into the basket.
-- The gripper should be at a safe height above the basket, so the object can be dropped from a safe height without collision with the basket rim.
+- If the gripper is to the left rim or to the right rim of the basket, and when opening the gripper, the grasped object may be droped out of the basket, so the position is bad. 
+The gripper should be well aligned with the basket center, so that the object can be safely dropped into the basket.
 Please return the ranking of the images in json format, for example:
 ```json
 [0, 1, 2, 5, 4]
@@ -573,8 +560,8 @@ The range of the ranking is from 0 to N-1, where N is the total number of candid
             sideview_image = obs_list[-1]['sideview_image'][::-1]
             sideview_image_byte = numpy_to_jpeg_bytes(sideview_image)
             sideview_image_byte_list.append(sideview_image_byte)
-        content = self.task_prompt + self.current_episode_prompt + [prompt] + sideview_image_byte_list + \
-            ["Please reason carefully about the placement status of the object in the images one by one, following the guidelines step by step, output your thought process, and then rank the placements from best to worst in json format as example above"]
+        content = self.task_prompt + [prompt] + sideview_image_byte_list + \
+            ["Please reason carefully about the placement status of the object in the images one by one, following the guidelines step by step, output your thought process, and then rank the positions from best to worst in json format as example above"]
         response = call_api(content, thinking="low")
         print("API response for sideview placement ranking:", response)
         return get_json(response)

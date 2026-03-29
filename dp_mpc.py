@@ -61,6 +61,7 @@ def run_mpc(task_id=0, seed=0):
     task_suite_name = "libero_object"
     task_id = task_id
     seed = seed
+    agent = VLMAgent(task_suite_name, task_id)
 
     benchmark_dict = benchmark.get_benchmark_dict()
     task_suite = benchmark_dict[task_suite_name]()
@@ -72,25 +73,23 @@ def run_mpc(task_id=0, seed=0):
 
     # ========== ENVIRONMENT INITIALIZATION ==========
     env.reset()
+    wm_env = env
+    # wm_env = WMEnv(env, empty_env, wm_client)
     num_steps = 0
     done = False
     replay_images = []
-    obs = env.set_init_state(initial_states[seed])
+    obs = wm_env.reset()
     for t in range(10):
-        obs, reward, done, info = env.step(LIBERO_DUMMY_ACTION)
+        obs, reward, done, info = wm_env.step(LIBERO_DUMMY_ACTION)
 
     # ========== LOAD POLICIES ==========
     from dp_utils import embed_lang
     subtask_description = task_description.replace(" up", "")
-    print(f"Subtask description: {subtask_description}")
     subtask_embedding = embed_lang(subtask_description)
         
     from dp_utils import load_checkpoint
     import robosuite.utils.transform_utils as T
-    # checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.02.27/09.11.46_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0014-test_mean_score=1.000.ckpt"
-    checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.19/11.59.01_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=2050-test_mean_score=1.000.ckpt"
-    # checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.05/06.14.04_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0022-test_mean_score=1.000.ckpt"
-    # checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.08/09.41.02_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0300-test_mean_score=1.000.ckpt"
+    checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.14/08.49.11_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0460-test_mean_score=0.100.ckpt"
     policy, cfg = load_checkpoint(checkpoint_path)
     policy = policy.to("cuda")
     import torch
@@ -112,8 +111,8 @@ def run_mpc(task_id=0, seed=0):
         return action
 
     # idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.02/07.30.54_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0100-val_loss=0.034.ckpt"
-    idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/08.56.15_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0110-val_loss=0.019.ckpt"
-    # idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.12/01.36.19_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0020-val_loss=0.025.ckpt"
+    # idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/08.56.15_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0110-val_loss=0.019.ckpt"
+    idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.12/01.36.19_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0020-val_loss=0.025.ckpt"
     idm, idm_cfg = load_checkpoint(idm_checkpoint_path)
     idm = idm.to("cuda")
     def idm_fn(obs, target_pos, target_quat=None):
@@ -130,8 +129,8 @@ def run_mpc(task_id=0, seed=0):
         np_pred_action = action_dict['action_pred'].cpu().numpy()[0]
         return np_pred_action
 
-    # idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.02/07.30.54_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0100-val_loss=0.034.ckpt"
     idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.11/21.52.52_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0040-val_loss=0.026.ckpt"
+    # idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/23.50.14_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0060-val_loss=0.020.ckpt"
     idm_2, idm_2_cfg = load_checkpoint(idm_2_checkpoint_path)
     idm_2 = idm_2.to("cuda")
     def idm_fn_2(obs, target_pos, target_quat=None):
@@ -156,18 +155,47 @@ def run_mpc(task_id=0, seed=0):
         with contextlib.redirect_stdout(log_file):
             # Phase 1: Execute policy for subtask 0
             import tqdm
-            print("Phase 1: Executing policy")
-            pbar = tqdm.tqdm(total=500, desc="Executing policy ")
-            while not done and num_steps < 400:
+            agent.start_episode(obs)
+            target_object_position = agent.identify_target_object()
+            plot_coordinates_on_image(obs, target_object_position, os.path.join(save_dir, f"object_proposal_task{task_id}_seed{seed}"))
+            target_point = generate_3d_point(target_object_position, empty_env.get_camera_info())
+            target_point[2] += 0.08
+            action_chunk = update_gripper_action(idm_fn(obs, target_point), -1)
+            for action in action_chunk:
+                obs, reward, done, info = wm_env.step(action)
+                replay_images.append(obs["agentview_image"][::-1])
+            
+            for _ in range(2):
                 action_chunk = policy_fn(obs)[:10]
-                for action in action_chunk:
-                    obs, reward, done, info = env.step(action)
+                for action in (action_chunk):
+                    obs, reward, done, info = wm_env.step(action)
                     replay_images.append(obs["agentview_image"][::-1])
-                pbar.update(10)
-                num_steps += 10
-        
-            pbar.close()
-            print(f"Execution completed. Total steps: {num_steps}, Done: {done}")
+                if done:
+                    break
+
+            agent.start_mpc(obs)
+            # agent_actions = agent.get_action_proposal()
+            # for action_dict in agent_actions:
+            #     if action_dict["action"] == "MOVE":
+            #         plot_coordinates_on_image(obs, action_dict['parameters'], os.path.join(save_dir, f"action_proposal_task{task_id}_seed{seed}"))
+            #         target_point = generate_3d_point(action_dict['parameters'], empty_env.get_camera_info())
+            #         target_quat = None
+            #         action_chunk = idm_fn(obs, target_point)
+            #         action_chunk = update_gripper_action(action_chunk, 1)
+            #         break 
+            place_actions = agent.place_proposal()
+            plot_coordinates_on_image(obs, place_actions, os.path.join(save_dir, f"place_proposal_task{task_id}_seed{seed}"))
+            target_point = generate_3d_point(place_actions, empty_env.get_camera_info())
+            target_quat = None
+            action_chunk = idm_fn(obs, target_point)
+            action_chunk = update_gripper_action(action_chunk, 1)
+
+            for action in action_chunk:
+                obs, reward, done, info = wm_env.step(action)
+                replay_images.append(obs["agentview_image"][::-1])
+            for _ in range(20):
+                obs, reward, done, info = wm_env.step(LIBERO_DUMMY_ACTION)
+                replay_images.append(obs["agentview_image"][::-1])
 
     import imageio
     imageio.mimwrite(os.path.join(save_dir, f"replay_task{task_id}_seed{seed}.mp4"), replay_images, fps=20)
@@ -180,12 +208,12 @@ def run_mpc(task_id=0, seed=0):
 
 
 if __name__ == "__main__":
-    for task in range(2,10):
+    for task in [0,1,2,4,7,8]:
         num_success = 0
         for seed in range(10):
             success = run_mpc(task_id=task, seed=seed)
             if success:
                 num_success += 1
-            print(f"Number of successful runs: {num_success}/{seed+1}")
+            print(f"Number of successful runs: {num_success}/{seed+1}", flush=True)
         with open(os.path.join("scratch_dir/mpc_data/libero_object/test_agent_proposal", f"task{task}", "result.txt"), "w") as f:
             f.write(f"Success rate: {num_success}/10\n")

@@ -1,23 +1,18 @@
-from libero.libero import benchmark, get_libero_path
+from libero.libero import benchmark
+from libero.libero import get_libero_path
 from libero.libero.envs import OffScreenRenderEnv
 from openpi_client import image_tools
 
-import contextlib
-import math
-import os
 import pathlib
-import shutil
-
-import imageio
 import numpy as np
-import robosuite.utils.transform_utils as T
-import torch
-import tqdm
+import math
+import imageio
+import os
+import shutil
+import contextlib
 
-from dp_utils import embed_lang, load_checkpoint
 from vlm_agent import VLMAgent
 from vlm_utils import *
-from wm_client.wm_env import WMEnv
 
 CAMERA_NAMES = ["agentview", "birdview", "robot0_eye_in_hand", "sideview", "canonical_frontview"]
 LIBERO_ENV_RESOLUTION = 224
@@ -33,11 +28,6 @@ def _get_libero_env(task, resolution, seed):
     return env, task_description
 
 def _get_empty_env(task, env):
-    """Create a headless 'empty' environment that shares the physics model with *env*.
-
-    Used for camera-info queries and world-model simulation without full
-    rendering overhead.
-    """
     import robosuite
     dataset_file = os.path.join(get_libero_path("datasets"), f"{task.problem_folder}/{task.name}_demo.hdf5")
     import h5py
@@ -62,18 +52,7 @@ def _get_empty_env(task, env):
 
 
 
-def run_mpc(task_id=0, seed=0, wm_client=None):
-    """Run one episode of VLM-guided MPC with candidate-search optimisation.
-
-    Phases:
-        1. Execute diffusion policy for subtask 0 until the handoff condition.
-        2. Query VLM agent for a goal point and refine via WM-simulated search
-           (midpoint → height → endpoint → local candidates).
-        3. Resume diffusion policy for subtask 1 to completion.
-
-    Returns:
-        bool: True if the task was completed successfully.
-    """
+def run_mpc(task_id=0, seed=0):
     save_dir = os.path.join("scratch_dir/mpc_data/libero_object/test_agent_search", f"task{task_id}", f"seed{seed}")
     os.makedirs(save_dir, exist_ok=True)
     if os.path.exists(save_dir):
@@ -81,6 +60,8 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
     os.makedirs(save_dir, exist_ok=True)
     
     task_suite_name = "libero_object"
+    task_id = task_id
+    seed = seed
     agent = VLMAgent(task_suite_name, task_id)
 
     benchmark_dict = benchmark.get_benchmark_dict()
@@ -92,29 +73,27 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
     print(f"Task description: {task_description}")
 
     # ========== ENVIRONMENT INITIALIZATION ==========
+    env.reset()
+    # wm_env = env
     wm_env = WMEnv(env, empty_env, wm_client)
-
-    wm_env.reset()
     num_steps = 0
     done = False
     replay_images = []
-    obs = env.set_init_state(initial_states[seed])
-    for t in range(60):
+    obs = wm_env.reset()
+    for t in range(10):
         obs, reward, done, info = wm_env.step(LIBERO_DUMMY_ACTION)
-    agent.start_episode(obs)
 
     # ========== LOAD POLICIES ==========
-
-    # -- Subtask language embeddings --
+    from dp_utils import embed_lang
     subtask_description = task_description.replace(" up", "")
-    print(f"Subtask description: {subtask_description}")
     subtask_embedding = embed_lang(subtask_description)
-    
-    # -- Diffusion policy --
+        
+    from dp_utils import load_checkpoint
+    import robosuite.utils.transform_utils as T
     checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.14/08.49.11_train_diffusion_transformer_hybrid_libero_image/checkpoints/epoch=0460-test_mean_score=0.100.ckpt"
     policy, cfg = load_checkpoint(checkpoint_path)
     policy = policy.to("cuda")
-
+    import torch
     def to_torch(image):
         image = image_tools.resize_with_pad(image, 128, 128)
         return np.moveaxis(image[::-1], -1, 0) / 255.0
@@ -132,8 +111,9 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
         action = np_action_dict['action_pred'][0]
         return action
 
-    # -- Inverse dynamics models (IDM) --
-    idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/08.56.15_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0110-val_loss=0.019.ckpt"
+    # idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.02/07.30.54_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0100-val_loss=0.034.ckpt"
+    # idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/08.56.15_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0110-val_loss=0.019.ckpt"
+    idm_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.12/01.36.19_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0020-val_loss=0.025.ckpt"
     idm, idm_cfg = load_checkpoint(idm_checkpoint_path)
     idm = idm.to("cuda")
     def idm_fn(obs, target_pos, target_quat=None):
@@ -150,8 +130,8 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
         np_pred_action = action_dict['action_pred'].cpu().numpy()[0]
         return np_pred_action
 
-    # idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.02/07.30.54_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0100-val_loss=0.034.ckpt"
-    idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/23.50.14_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0060-val_loss=0.020.ckpt"
+    idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.11/21.52.52_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0040-val_loss=0.026.ckpt"
+    # idm_2_checkpoint_path = "/net/holy-isilon/ifs/rc_labs/ydu_lab/xczhang/workspace/SAILOR/diffusion_policy/data/outputs/2026.03.17/23.50.14_train_diffusion_unet_lowdim_idm_libero_idm/checkpoints/epoch=0060-val_loss=0.020.ckpt"
     idm_2, idm_2_cfg = load_checkpoint(idm_2_checkpoint_path)
     idm_2 = idm_2.to("cuda")
     def idm_fn_2(obs, target_pos, target_quat=None):
@@ -167,153 +147,72 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
             action_dict = idm_2.predict_action(obs_dict, delta_obs_dict)
         np_pred_action = action_dict['action_pred'].cpu().numpy()[0]
         return np_pred_action
-
+    
 
     # ========== EXECUTION PIPELINE ==========
     # Redirect all prints to log file
     log_file_path = os.path.join(save_dir, f"execution_log_task{task_id}_seed{seed}.txt")
     with open(log_file_path, 'w') as log_file:
         with contextlib.redirect_stdout(log_file):
-            # Phase 1: First MPC
-            print("Phase 1: Executing agent MPC...")
-
-            # position for picking up the object
-            agent.start_mpc(obs)
-            agent_actions = agent.get_action_proposal()
-            gripper_action = -1
-            for action_dict in agent_actions:
-                if action_dict["action"] == "MOVE":
-                    plot_coordinates_on_image(obs, action_dict['parameters'], os.path.join(save_dir, f"pick_proposal.png"))
-                    target_point = generate_3d_point(action_dict['parameters'], empty_env.get_camera_info())
-                    target_quat = [1, 0, 0, 0]
-                    action_chunk = idm_fn(obs, target_point, target_quat)
-                    action_chunk = update_gripper_action(action_chunk, gripper_action)
-                    break
-            # plot_coordinates_on_image(obs, agent_actions, os.path.join(save_dir, f"pick_proposal.png"))
-            # target_point = generate_3d_point(agent_actions, empty_env.get_camera_info())
-            # target_quat = [1,0,0,0]
-            # action_chunk = idm_fn(obs, target_point)
-            # action_chunk = update_gripper_action(action_chunk, gripper_action)
-            
-            # position for placing the object
-            final_position = agent.place_proposal()
-            final_target_point = generate_3d_point(final_position, empty_env.get_camera_info())
-            plot_coordinates_on_image(obs, final_position, os.path.join(save_dir, f"place_proposal.png"))
-
-            # Phase 2: Optimise trajectory to grasp
-            for action in action_chunk[:20]:
-                obs, reward, done, info = wm_env.step(action)
-                replay_images.append(obs["agentview_image"][::-1])
-                num_steps += 1
-            agent.cache_obs(obs)
-            action_chunk = update_gripper_action(idm_fn_2(obs, target_point, target_quat), gripper_action)
-
-            # -- Step 1: Optimise endpoint position --
-            with wm_env.simulation():
-                pred_obs = wm_env.simulate(action_chunk)
-                wm_agent_obs = pred_obs['future_obs']
-            imageio.mimwrite(os.path.join(save_dir, 'test_dp_output_wm_1.mp4'), pred_obs['WMPredictionOutput'].full_video, fps=20)
-            endpoint_response = agent.optimize_endpoint(wm_agent_obs)
-            target_point += optimize_endpoint(endpoint_response, scale=0.05)
-
-            # target_point += np.array([0, 0, 0.03])  # lift up for better clearance
-
-            # -- Step 2: Local candidate search --
-            candidate_obs = []
-            candidate_actions = []
-            candidate_points = generate_candidates(target_point, scale=0.05)
-            for i, candidate_point in enumerate(candidate_points):
-                with wm_env.simulation():
-                    candidate_action = update_gripper_action(idm_fn_2(obs, candidate_point, target_quat), gripper_action)
-                    candidate_actions.append(candidate_action)
-                    next_obs = wm_env.simulate(candidate_action)
-                    # next_action_chunk = policy_fn(next_obs['future_obs'][-1], subtask_id=1)[:20]
-                    # next_obs = wm_env.simulate(next_action_chunk)
-                imageio.mimwrite(os.path.join(save_dir, f'dp_position_round0_candidate{i}.mp4'), next_obs['WMPredictionOutput'].full_video, fps=20)
-                candidate_obs.append(next_obs['future_obs'])
-            wristview_ranking = agent.rank_images_wristview(candidate_obs)
-            # frontview_ranking = agent.rank_images_frontview(candidate_obs)
-            action_chunk = candidate_actions[wristview_ranking[0]]
-            target_point = candidate_points[wristview_ranking[0]]
-
-            # # # second round of local candidate search
-            # candidate_obs = []
-            # candidate_actions = []
-            # candidate_points = generate_candidates(target_point, scale=0.04)
-            # for i, candidate_point in enumerate(candidate_points):
-            #     with wm_env.simulation():
-            #         candidate_action = update_gripper_action(idm_fn_2(obs, candidate_point, target_quat), gripper_action)
-            #         candidate_actions.append(candidate_action)
-            #         next_obs = wm_env.simulate(candidate_action)
-            #         # next_action_chunk = policy_fn(next_obs['future_obs'][-1], subtask_id=1)[:20]
-            #         # next_obs = wm_env.simulate(next_action_chunk)
-            #     imageio.mimwrite(os.path.join(save_dir, f'dp_position_round1_candidate{i}.mp4'), next_obs['WMPredictionOutput'].full_video, fps=20)
-            #     candidate_obs.append(next_obs['future_obs'])
-            # wristview_ranking = agent.rank_images_wristview(candidate_obs)
-            # # frontview_ranking = agent.rank_images_frontview(candidate_obs)
-            # action_chunk = candidate_actions[wristview_ranking[0]]
-            # target_point = candidate_points[wristview_ranking[0]]
-
-            # -- Execute optimised trajectory --
+            # Phase 1: Execute policy for subtask 0
+            import tqdm
+            agent.start_episode(obs)
+            target_object_position = agent.identify_target_object()
+            plot_coordinates_on_image(obs, target_object_position, os.path.join(save_dir, f"object_proposal_task{task_id}_seed{seed}"))
+            target_point = generate_3d_point(target_object_position, empty_env.get_camera_info())
+            target_point[2] += 0.08
+            action_chunk = update_gripper_action(idm_fn(obs, target_point), -1)
             for action in action_chunk:
                 obs, reward, done, info = wm_env.step(action)
                 replay_images.append(obs["agentview_image"][::-1])
-            num_steps += len(action_chunk)
-
-            # -- Execute policy for grasp -- 
-            for _ in range(8):
+            
+            for _ in range(2):
                 action_chunk = policy_fn(obs)[:10]
                 for action in (action_chunk):
                     obs, reward, done, info = wm_env.step(action)
                     replay_images.append(obs["agentview_image"][::-1])
-                num_steps += 10
+                if done:
+                    break
 
-            # Phase 2: Place the object after grasp
-            print("Phase 4: Placing the object with agent MPC...")
-            gripper_action = 1
-            action_chunk = update_gripper_action(idm_fn(obs, final_target_point), gripper_action)
-            for action in action_chunk[:20]:
-                obs, reward, done, info = wm_env.step(action)
-                replay_images.append(obs["agentview_image"][::-1])
-                num_steps += 1
-            action_chunk = update_gripper_action(idm_fn_2(obs, final_target_point), gripper_action)
+            agent.start_mpc(obs)
+            place_actions = agent.place_proposal()
+            plot_coordinates_on_image(obs, place_actions, os.path.join(save_dir, f"place_proposal_task{task_id}_seed{seed}"))
+            target_point = generate_3d_point(place_actions, empty_env.get_camera_info())
+            target_quat = None
+            action_chunk = idm_fn(obs, target_point)
+            action_chunk = update_gripper_action(action_chunk, 1)
+
             with wm_env.simulation():
                 pred_obs = wm_env.simulate(action_chunk)
                 wm_agent_obs = pred_obs['future_obs']
-            imageio.mimwrite(os.path.join(save_dir, 'test_dp_output_wm_2.mp4'), pred_obs['WMPredictionOutput'].full_video, fps=20)
-            placement_response = agent.optimize_placement(wm_agent_obs)
-            final_target_point += optimize_endpoint(placement_response, scale=0.05)
-            action_chunk = update_gripper_action(idm_fn_2(obs, final_target_point), gripper_action)
+            imageio.mimwrite(os.path.join(save_dir, 'test_dp_output_wm_1.mp4'), pred_obs['WMPredictionOutput'].full_video, fps=20)
+            trajectory_response = agent.optimize_trajectory(wm_agent_obs)
+            adjustment = optimize_trajectory(trajectory_response, scale=0.1)
+            target_point = target_point + adjustment
+            action_chunk = idm_fn(obs, target_point)
+            action_chunk = update_gripper_action(action_chunk, 1)
 
-            # -- Step 2: Local candidate search --
+
             candidate_obs = []
             candidate_actions = []
-            candidate_points = generate_candidates(final_target_point, scale=0.05)
+            candidate_points = [target_point, target_point + np.array([-0.05, 0, 0]), target_point + np.array([0.05, 0, 0])]
             for i, candidate_point in enumerate(candidate_points):
                 with wm_env.simulation():
-                    candidate_action = update_gripper_action(idm_fn_2(obs, candidate_point, target_quat), gripper_action)
+                    candidate_action = update_gripper_action(idm_fn(obs, candidate_point), 1)
                     candidate_actions.append(candidate_action)
                     next_obs = wm_env.simulate(candidate_action)
-                    # next_action_chunk = policy_fn(next_obs['future_obs'][-1], subtask_id=1)[:20]
-                    # next_obs = wm_env.simulate(next_action_chunk)
-                imageio.mimwrite(os.path.join(save_dir, f'dp_placement_round0_candidate{i}.mp4'), next_obs['WMPredictionOutput'].full_video, fps=20)
+                imageio.mimwrite(os.path.join(save_dir, f'test_dp_output_candidate{i}.mp4'), next_obs['WMPredictionOutput'].full_video, fps=20)
                 candidate_obs.append(next_obs['future_obs'])
-            frontview_ranking = agent.rank_placement_frontview(candidate_obs)
             sideview_ranking = agent.rank_placement_sideview(candidate_obs)
-            best_candidate = combine_rankings(frontview_ranking, sideview_ranking)
-            print(best_candidate)
-            action_chunk = candidate_actions[best_candidate]
-            print(action_chunk)
-            for action in action_chunk[:20]:
+            action_chunk = candidate_actions[sideview_ranking[0]]
+            target_point = candidate_points[sideview_ranking[0]]
+
+            for action in action_chunk:
                 obs, reward, done, info = wm_env.step(action)
                 replay_images.append(obs["agentview_image"][::-1])
-                num_steps += 1
             for _ in range(20):
                 obs, reward, done, info = wm_env.step(LIBERO_DUMMY_ACTION)
-                # replay_images.append(obs["agentview_image"][::-1])
-                num_steps += 1
-
-            print(f"Execution completed. Total steps: {num_steps}, Done: {done}")
+                replay_images.append(obs["agentview_image"][::-1])
 
     imageio.mimwrite(os.path.join(save_dir, f"replay_task{task_id}_seed{seed}.mp4"), replay_images, fps=20)
     
@@ -327,16 +226,17 @@ def run_mpc(task_id=0, seed=0, wm_client=None):
 if __name__ == "__main__":
 
     from wm_client.client import WMClient
+    from wm_client.wm_env import WMEnv
     host = "0.0.0.0"
     port = 7880
     wm_client = WMClient(host, port)
 
     for task in [1]:
         num_success = 0
-        for seed in range(1, 10):
-            success = run_mpc(task_id=task, seed=seed, wm_client=wm_client)
+        for seed in range(10):
+            success = run_mpc(task_id=task, seed=seed)
             if success:
                 num_success += 1
-            print(f"Number of successful runs: {num_success}/{seed+1}")
+            print(f"Number of successful runs: {num_success}/{seed+1}", flush=True)
         with open(os.path.join("scratch_dir/mpc_data/libero_object/test_agent_search", f"task{task}", "result.txt"), "w") as f:
             f.write(f"Success rate: {num_success}/10\n")
