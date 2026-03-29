@@ -13,7 +13,7 @@ from libero.libero.envs import OffScreenRenderEnv
 
 from vlm_api import call_api
 from vlm_utils import *
-from test_sam import *
+from sam import *
 
 prompt_base = """- Part 0: Instruction
 You are a robotics expert, and you are here given a robot manipulation task.
